@@ -2,8 +2,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-int main()
+int main(int argc, char const *argv[])
 {
-  printf("AAA");
+  if (argc > 2)
+  {
+    //program
+  }
   return 0;
 }
