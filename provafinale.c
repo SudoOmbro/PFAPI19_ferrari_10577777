@@ -2,6 +2,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define OUT_REL_TABLE_SIZE 500
+#define ENTITY_TABLE_SIZE 80000
+#define RELATIONS_TABLE_SIZE 30
+
 //type definitions--------------------------------------------------------------
 
 typedef char LongString[160];
@@ -21,7 +25,7 @@ typedef struct {
 
 typedef struct {
   String name;
-  Relation_in_entity* out_relations_table[500];
+  Relation_in_entity* out_relations_table[OUT_REL_TABLE_SIZE];
   void* table_next;
 } Entity;
 
@@ -30,35 +34,47 @@ typedef struct {
   void* list_next;
 } Popular_entity;
 
-Entity* entity_table[80000];
-Relation* relation_table[30];
+Entity* entity_table[ENTITY_TABLE_SIZE];
+Relation* relations_table[RELATIONS_TABLE_SIZE];
 
 //------------------------------------------------------------------------------
 //functions definitions
 
-int hash_function(int table_size, String text)
+int hash_function(char* text, const int table_size)
 {
-  int value;
+  int i;
+  int value = 0;
+  char byte = text[0];
+  for (i=0; byte != '\0'; i++)
+  {
+    value += byte*(i+i+1)+byte;
+    byte = text[i];
+  }
+  value = (value << 1)% table_size;
+  printf("%d\n", value);
+  while (value > table_size)
+    value -= table_size;
   return value;
 }
 //data la grandezza della tabella e una stringa in input genera un valore
+//nel range della grandezza della tablella.
+//entity: 91711
+//relation: 43
+//out_rel: 877
 
-int get_argument(LongString input_string, char dest_string[50], int start_pos)
+int get_argument(LongString input_string, char* dest_string, int start_pos)
 {
   char byte = input_string[start_pos];
   int string_length = 0;
-  while (byte != ' ' && byte != 0) //while the character isn't a space or the STC
+  while (byte != ' ' && byte != '\n' && byte != '\0') //while the char is valid
   {
-    printf("length: %d\n", string_length);
-    printf("char: %c\n", byte);
     dest_string[string_length] = byte;
     string_length ++;
     start_pos ++;
     byte = input_string[start_pos];
   }
-  string_length --;
   dest_string[string_length] = '\0';
-  return start_pos;
+  return start_pos+1;
 }
 //data in ingresso la stringa in stdin, la analizza e riempie la stringa
 //dest_string (argomento) con la stringa trovata a partire da start_pos
@@ -78,14 +94,14 @@ int generate_opcode(LongString input_string)
   {
     if (input_string[3] == 'e') //addent
       opcode = 0;
-    else if (input_string[3] == 'r') //addrel
+    else //addrel
       opcode = 1;
   }
   else if (input_string[0] == 'd') //delent or delrel
   {
     if (input_string[3] == 'e') //delent
       opcode = 2;
-    else if (input_string[3] == 'r') //delrel
+    else //delrel
       opcode = 3;
   }
   else if (input_string[0] == 'r') //report
@@ -101,6 +117,11 @@ int generate_opcode(LongString input_string)
 //case 4 : report
 //case 5 : end
 
+void malloc_cleanup()
+{
+
+}
+
 //------------------------------------------------------------------------------
 int main() //main program
 {
@@ -108,6 +129,7 @@ int main() //main program
   String argument1;
   String argument2;
   LongString input_string;
+
   int opcode;
   while (1)
   {
@@ -117,51 +139,41 @@ int main() //main program
     switch (opcode)
     {
       case 0:
+        get_argument(input_string, argument0, 7);
+        opcode = hash_function(argument0, ENTITY_TABLE_SIZE);
         #ifdef deb
-        printf("case 0\n");
+        printf("string: %s, size: %d, position: %d\n", argument0, ENTITY_TABLE_SIZE, opcode);
         #endif
-        opcode = get_argument(input_string, argument0, 7);
-        printf("argument: %s\n", argument0);
-        printf("next argument position: %d\n", opcode);
-
-        opcode = get_argument(input_string, argument1, opcode);
-        printf("argument: %s\n", argument1);
-        printf("next argument position: %d\n", opcode);
-
         break;
 
       case 1:
+        get_argument(input_string, argument0, 7);
+        opcode = hash_function(argument0, RELATIONS_TABLE_SIZE);
         #ifdef deb
-        printf("case 1\n");
+        printf("string: %s, size: %d, position: %d\n", argument0, RELATIONS_TABLE_SIZE, opcode);
         #endif
 
         break;
 
       case 2:
-        #ifdef deb
-        printf("case 2\n");
-        #endif
+        opcode = get_argument(input_string, argument0, 7);
+        opcode = get_argument(input_string, argument1, opcode);
+        get_argument(input_string, argument2, opcode);
 
         break;
 
       case 3:
-        #ifdef deb
-        printf("case 3\n");
-        #endif
+        opcode = get_argument(input_string, argument0, 7);
+        opcode = get_argument(input_string, argument1, opcode);
+        get_argument(input_string, argument2, opcode);
 
         break;
 
       case 4:
-        #ifdef deb
-        printf("case 4\n");
-        #endif
 
         break;
 
       case 5:
-        #ifdef debug
-        printf("case 5\n");
-        #endif
 
         return 0;
         break;
