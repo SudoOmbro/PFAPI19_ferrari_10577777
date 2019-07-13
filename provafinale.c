@@ -29,7 +29,7 @@ typedef struct {
   void* table_next;
 } Entity;
 
-typedef struct {
+typedef struct { 
   Entity* entity;
   void* list_next;
 } Popular_entity;
@@ -75,7 +75,7 @@ int get_argument(LongString input_string, char* dest_string, int start_pos)
 //data in ingresso la stringa in stdin, la analizza e riempie la stringa
 //dest_string (argomento) con la stringa trovata a partire da start_pos
 //fino ad uno spazio.
- 
+
 void* global_hash_table_linear_search(String name, int table_pos, int table)
 {
   switch(table)
