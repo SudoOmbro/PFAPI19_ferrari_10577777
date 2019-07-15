@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define OUT_REL_TABLE_SIZE 499
+#define SUB_REL_TABLE_SIZE 499
 #define ENTITY_TABLE_SIZE 91711
 #define RELATIONS_TABLE_SIZE 43
 
@@ -13,26 +13,23 @@ typedef char String[50];
 
 typedef struct {
   String name;
-  void* first_popular_entity;
-  void* table_next;
+  void* most_popular_entities[20];  //Entity*
+  int occurrences[20];
+  void* table_next; //Relation*
 } Relation;
 
 typedef struct {
-  Relation* name;
-  void* dest_entity;
-  void* table_next;
-} Relation_in_entity;
-
-typedef struct {
   String name;
-  Relation_in_entity* out_relations_table[OUT_REL_TABLE_SIZE];
-  void* table_next;
+  void* table_next; //Entity*
+  void* sub_relations[SUB_REL_TABLE_SIZE];  //SubRelation*
 } Entity;
 
-typedef struct { 
-  Entity* entity;
-  void* list_next;
-} Popular_entity;
+typedef struct {
+  Relation* relation;
+  Entity* source;
+  Entity* destination;
+  void* table_next; //SubRelation*
+} SubRelation;
 
 Entity* entity_table[ENTITY_TABLE_SIZE];          // = table 0
 Relation* relations_table[RELATIONS_TABLE_SIZE];  // = table 1
@@ -139,6 +136,15 @@ Entity* create_entity(String name)
 }
 //crea entità, assegna il nome e ritorna il puntatore.
 
+Relation* create_relation(String name)
+{
+  Relation* self;
+  self = (Relation*) malloc(sizeof(Relation));
+  strcpy(self->name, name);
+  return self;
+}
+//crea relazione, assegna il nome e ritorna il puntatore.
+
 Entity* handle_entity_creation(String name)
 {
   int pos = hash_function(name, ENTITY_TABLE_SIZE);
@@ -166,7 +172,35 @@ Entity* handle_entity_creation(String name)
 }
 //handle entity creation
 
-//debug functions-------------------------------------------------------------
+Relation* handle_relation_creation(String name, String e1, String e2)
+{
+  int pos = hash_function(name, RELATIONS_TABLE_SIZE);
+  #ifdef deb
+  printf("line: %d\n", pos);
+  #endif
+  if (relations_table[pos] == NULL)
+  {
+    relations_table[pos] = create_relation(name);
+    return relations_table[pos];
+  }
+  else
+  {
+    Relation* rel = relations_table[pos];
+    while (rel != NULL)
+    {
+      if (strcmp(name, rel->name) == 0)
+        return 0;
+      rel = (Relation*) rel->table_next;
+    }
+    rel->table_next = create_entity(name);
+    return (Relation*) rel->table_next;
+  }
+  return 0;
+}
+//handle relation creation
+
+//debug functions---------------------------------------------------------------
+
 #ifdef deb
 void deb_print_entities()
 {
@@ -186,6 +220,8 @@ void deb_print_entities()
   }
 }
 #endif
+
+//------------------------------------------------------------------------------
 
 int generate_opcode(LongString input_string)
 {
