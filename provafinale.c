@@ -6,6 +6,8 @@
 #define ENTITY_TABLE_SIZE 91711
 #define RELATIONS_TABLE_SIZE 43
 
+/* add -Ddeb to gcc compiler options to launch in verbose debug mode */
+
 //type definitions--------------------------------------------------------------
 
 typedef char LongString[160];
@@ -52,7 +54,7 @@ int hash_function(char* text, const int table_size)
   }
   value =  value % table_size;
   #ifdef deb
-  printf("%d\n", value);
+  printf("hash value: %d\n", value);
   #endif
   return value;
 }
@@ -158,14 +160,15 @@ SubRelation* create_sub_relation(Entity* e1, Entity* e2)
   return self;
 }
 
-int relation_add_entities(Relation* rel, String name1, String name2)
+int relation_add_entities(Relation* rel, Entity* e1, Entity* e2)
 {
-  int pos = strcmp(name1, name2) % SUB_REL_TABLE_SIZE;
-  Entity* e1 = get_entity(name1);
-  Entity* e2 = get_entity(name2);
+  int pos = strcmp(e1->name, e2->name) % SUB_REL_TABLE_SIZE;
   if (rel->sub_relations[pos] == NULL)
   {
     rel->sub_relations[pos] = create_sub_relation(e1, e2);
+    #ifdef deb
+      printf("Added entries to relation\n");
+    #endif
   }
   else
   {
@@ -173,10 +176,18 @@ int relation_add_entities(Relation* rel, String name1, String name2)
     while(sub_rel != NULL)
     {
       if (e1 == sub_rel->source && e2 == sub_rel->destination)
+      {
+        #ifdef deb
+          printf("Relation already exists\n");
+        #endif
         return 1;
+      }
       sub_rel = (SubRelation*) sub_rel->table_next;
     }
     sub_rel = create_sub_relation(e1, e2);
+    #ifdef deb
+      printf("Added entries to relation\n");
+    #endif
   }
   return 0;
 }
@@ -185,12 +196,12 @@ int relation_add_entities(Relation* rel, String name1, String name2)
 Entity* handle_entity_creation(String name)
 {
   int pos = hash_function(name, ENTITY_TABLE_SIZE);
-  #ifdef deb
-  printf("line: %d\n", pos);
-  #endif
   if (entity_table[pos] == NULL)
   {
     entity_table[pos] = create_entity(name);
+    #ifdef deb
+      printf("Created new entity in empty slot\n");
+    #endif
     return entity_table[pos];
   }
   else
@@ -199,25 +210,47 @@ Entity* handle_entity_creation(String name)
     while (entity != NULL)
     {
       if (strcmp(name, entity->name) == 0)
+      {
+        #ifdef deb
+          printf("Entity already exists\n");
+        #endif
         return 0;
+      }
       entity = (Entity*) entity->table_next;
     }
+    #ifdef deb
+      printf("Created new entity\n");
+    #endif
     entity = create_entity(name);
     return (Entity*) entity->table_next;
   }
+  #ifdef deb
+    printf("Error\n");
+  #endif
   return 0;
 }
 //handle entity creation
 
-Relation* handle_relation_creation(String name, String e1, String e2)
+Relation* handle_relation_creation(String name1, String name2, String name)
 {
   int pos = hash_function(name, RELATIONS_TABLE_SIZE);
-  #ifdef deb
-  printf("line: %d\n", pos);
-  #endif
+  Entity* e1 = get_entity(name1);
+  Entity* e2 = get_entity(name2);
+
+  if (e1 == NULL || e2 == NULL) //check if entities exist.
+  {
+    #ifdef deb
+      printf("one of the entities does not exist\n");
+    #endif
+    return 0;
+  }
+
   if (relations_table[pos] == NULL)
   {
     relations_table[pos] = create_relation(name);
+    #ifdef deb
+      printf("Created new relation in empty slot\n");
+    #endif
     relation_add_entities(relations_table[pos], e1, e2);
     return relations_table[pos];
   }
@@ -233,13 +266,25 @@ Relation* handle_relation_creation(String name, String e1, String e2)
       }
       rel = (Relation*) rel->table_next;
     }
-    rel->table_next = create_entity(name);
+    rel = create_relation(name);
+    #ifdef deb
+      printf("Created new relation\n");
+    #endif
+    relation_add_entities(rel, e1, e2);
     return (Relation*) rel->table_next;
   }
+  #ifdef deb
+    printf("Error\n");
+  #endif
   return 0;
 }
 //handle relation creation, return 0 if nothing was created, the relation
 //created or modified otherwise.
+
+void report_function()
+{
+
+}
 
 //debug functions---------------------------------------------------------------
 
@@ -267,25 +312,24 @@ void deb_print_entities()
 
 int generate_opcode(LongString input_string)
 {
-  int opcode = 5;
   if (input_string[0] == 'a') //addent or addrel
   {
     if (input_string[3] == 'e') //addent
-      opcode = 0;
+      return 0;
     else //addrel
-      opcode = 1;
+      return 1;
   }
   else if (input_string[0] == 'd') //delent or delrel
   {
     if (input_string[3] == 'e') //delent
-      opcode = 2;
+      return 2;
     else //delrel
-      opcode = 3;
+      return 3;
   }
   else if (input_string[0] == 'r') //report
-    opcode = 4;
+    return 4;
 
-  return opcode;
+  return 5; //end
 }
 //guarda i primi 6 caratteri della stringa in input per generare l'opcode.
 
@@ -305,37 +349,30 @@ int main() //main program
 
     switch (opcode)
     {
-      case 0:
-    {
+      case 0: //addent
+      {
         get_argument(input_string, argument0, 7);
-        Entity* entity = handle_entity_creation(argument0);
+        handle_entity_creation(argument0);
         #ifdef deb
-        if (entity != 0)
-          printf("Entity created\n");
-        else
-          printf("Entity already exists\n");
-        deb_print_entities();
+          deb_print_entities();
         #endif
         break;
       }
-      case 1:
+      case 1: //addrel
       {
-        get_argument(input_string, argument0, 7);
-        opcode = hash_function(argument0, RELATIONS_TABLE_SIZE);
-        #ifdef deb
-        printf("string: %s, size: %d, position: %d\n", argument0, RELATIONS_TABLE_SIZE, opcode);
-        #endif
-
-        break;
-
-      case 2:
         opcode = get_argument(input_string, argument0, 7);
         opcode = get_argument(input_string, argument1, opcode);
         get_argument(input_string, argument2, opcode);
+        handle_relation_creation(argument0, argument1, argument2);
+        break;
+      }
+      case 2: //delent
+      {
+        opcode = get_argument(input_string, argument0, 7);
 
         break;
       }
-      case 3:
+      case 3: //delrel
       {
         opcode = get_argument(input_string, argument0, 7);
         opcode = get_argument(input_string, argument1, opcode);
@@ -343,12 +380,12 @@ int main() //main program
 
         break;
       }
-      case 4:
+      case 4: //report
       {
-
+        report_function();
         break;
       }
-      case 5:
+      case 5: //end
       {
         return 0;
         break;
