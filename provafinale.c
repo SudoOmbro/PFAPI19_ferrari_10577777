@@ -13,23 +13,27 @@ typedef char String[50];
 
 typedef struct {
   String name;
-  void* most_popular_entities[20];  //Entity*
-  int occurrences[20];
+  void* sub_relations[SUB_REL_TABLE_SIZE];  //SubRelation*
+  void* most_popular_entity;  //MSE*
   void* table_next; //Relation*
 } Relation;
 
 typedef struct {
   String name;
   void* table_next; //Entity*
-  void* sub_relations[SUB_REL_TABLE_SIZE];  //SubRelation*
 } Entity;
 
 typedef struct {
-  Relation* relation;
   Entity* source;
   Entity* destination;
   void* table_next; //SubRelation*
 } SubRelation;
+
+typedef struct {
+  Entity* entity;
+  int times;
+  void* next; //MSE*
+} MSE;
 
 Entity* entity_table[ENTITY_TABLE_SIZE];          // = table 0
 Relation* relations_table[RELATIONS_TABLE_SIZE];  // = table 1
