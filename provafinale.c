@@ -149,6 +149,39 @@ Relation* create_relation(String name)
 }
 //crea relazione, assegna il nome e ritorna il puntatore.
 
+SubRelation* create_sub_relation(Entity* e1, Entity* e2)
+{
+  SubRelation* self = (SubRelation*) malloc(sizeof(SubRelation));
+  self->source = e1;
+  self->destination = e2;
+  self->table_next = NULL;
+  return self;
+}
+
+int relation_add_entities(Relation* rel, String name1, String name2)
+{
+  int pos = strcmp(name1, name2) % SUB_REL_TABLE_SIZE;
+  Entity* e1 = get_entity(name1);
+  Entity* e2 = get_entity(name2);
+  if (rel->sub_relations[pos] == NULL)
+  {
+    rel->sub_relations[pos] = create_sub_relation(e1, e2);
+  }
+  else
+  {
+    SubRelation* sub_rel = (SubRelation*) rel->sub_relations[pos];
+    while(sub_rel != NULL)
+    {
+      if (e1 == sub_rel->source && e2 == sub_rel->destination)
+        return 1;
+      sub_rel = (SubRelation*) sub_rel->table_next;
+    }
+    sub_rel = create_sub_relation(e1, e2);
+  }
+  return 0;
+}
+//ritorna 0 se tutto ok, 1 altrimenti
+
 Entity* handle_entity_creation(String name)
 {
   int pos = hash_function(name, ENTITY_TABLE_SIZE);
@@ -169,7 +202,7 @@ Entity* handle_entity_creation(String name)
         return 0;
       entity = (Entity*) entity->table_next;
     }
-    entity->table_next = create_entity(name);
+    entity = create_entity(name);
     return (Entity*) entity->table_next;
   }
   return 0;
@@ -185,6 +218,7 @@ Relation* handle_relation_creation(String name, String e1, String e2)
   if (relations_table[pos] == NULL)
   {
     relations_table[pos] = create_relation(name);
+    relation_add_entities(relations_table[pos], e1, e2);
     return relations_table[pos];
   }
   else
@@ -193,7 +227,10 @@ Relation* handle_relation_creation(String name, String e1, String e2)
     while (rel != NULL)
     {
       if (strcmp(name, rel->name) == 0)
-        return 0;
+      {
+        relation_add_entities(rel, e1, e2);
+        return rel;
+      }
       rel = (Relation*) rel->table_next;
     }
     rel->table_next = create_entity(name);
@@ -201,7 +238,8 @@ Relation* handle_relation_creation(String name, String e1, String e2)
   }
   return 0;
 }
-//handle relation creation
+//handle relation creation, return 0 if nothing was created, the relation
+//created or modified otherwise.
 
 //debug functions---------------------------------------------------------------
 
