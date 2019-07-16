@@ -377,7 +377,7 @@ void report_function()
 
 //debug functions---------------------------------------------------------------
 
-//#ifdef deb
+#ifdef deb
 
 void deb_print_entities()
 {
@@ -432,7 +432,7 @@ void deb_print_relations()
   }
 }
 
-//#endif
+#endif
 
 //------------------------------------------------------------------------------
 
