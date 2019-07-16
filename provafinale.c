@@ -195,10 +195,12 @@ int relation_add_entities(Relation* rel, Entity* e1, Entity* e2)
   }
   else
   {
-    SubRelation* sub_rel = (SubRelation*) *start;
+    SubRelation* sub_rel = *start;
+    SubRelation* prev_rel;
     while(sub_rel != NULL)
     {
-      if (e1 == sub_rel->source && e2 == sub_rel->destination)
+      prev_rel = sub_rel;
+      if (e1 == (sub_rel)->source && e2 == (sub_rel)->destination)
       {
         #ifdef deb
           printf("Relation already exists.\n");
@@ -208,6 +210,7 @@ int relation_add_entities(Relation* rel, Entity* e1, Entity* e2)
       sub_rel = (SubRelation*) sub_rel->table_next;
     }
     sub_rel = create_sub_relation(e1, e2);
+    prev_rel->table_next = sub_rel;
     #ifdef deb
       printf("Added entries to relation\n");
     #endif
@@ -230,8 +233,10 @@ Entity* handle_entity_creation(String name)
   else
   {
     Entity* entity = entity_table[pos];
+    Entity* prev_entity;
     while (entity != NULL)
     {
+      prev_entity = entity;
       if (strcmp(name, entity->name) == 0)
       {
         #ifdef deb
@@ -245,7 +250,8 @@ Entity* handle_entity_creation(String name)
       printf("Created new entity\n");
     #endif
     entity = create_entity(name);
-    return (Entity*) entity->table_next;
+    prev_entity->table_next = entity;
+    return entity;
   }
   #ifdef deb
     printf("Error\n");
@@ -280,8 +286,10 @@ Relation* handle_relation_creation(String name1, String name2, String name)
   else
   {
     Relation* rel = relations_table[pos];
+    Relation* prev_rel;
     while (rel != NULL)
     {
+      prev_rel = rel;
       if (strcmp(name, rel->name) == 0)
       {
         relation_add_entities(rel, e1, e2);
@@ -290,11 +298,12 @@ Relation* handle_relation_creation(String name1, String name2, String name)
       rel = (Relation*) rel->table_next;
     }
     rel = create_relation(name);
+    prev_rel->table_next = rel;
     #ifdef deb
       printf("Created new relation\n");
     #endif
     relation_add_entities(rel, e1, e2);
-    return (Relation*) rel->table_next;
+    return rel;
   }
   #ifdef deb
     printf("Error\n");
