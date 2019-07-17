@@ -15,21 +15,24 @@ typedef char String[50];
 
 typedef struct {
   String name;
-  void* sub_relations[SUB_REL_TABLE_SIZE];  //SubRelation*
   void* most_popular_entity;  //MSE*
   void* table_next; //Relation*
 } Relation;
 
 typedef struct {
   String name;
+  void* sub_relations[SUB_REL_TABLE_SIZE];  //SubRelation*
+  int entity_id; //add 1 when entity changes.
+  int valid;     // = 1 when valid, else = 0.
   void* table_next; //Entity*
 } Entity;
 
 typedef struct {
+  Relation* relation;
   Entity* source;
-  Entity* destination;
+  int source_id;
   void* table_next; //SubRelation*
-} SubRelation;
+} SubRelation;  //the destination is the entity that contains it.
 
 typedef struct {
   Entity* entity;
@@ -89,7 +92,12 @@ void* global_hash_table_linear_search(String name, int table_pos, int table)
       while (entity != NULL)
       {
         if (strcmp(name, entity->name) == 0)
+        {
+          #ifdef deb
+            printf("linear search done, found entity\n");
+          #endif
           return entity;
+        }
         entity = (Entity*) entity->table_next;
       }
       break;
@@ -100,12 +108,20 @@ void* global_hash_table_linear_search(String name, int table_pos, int table)
       while (rel != NULL)
       {
         if (strcmp(name, rel->name) == 0)
+        {
+          #ifdef deb
+            printf("linear search done, found relation\n");
+          #endif
           return rel;
+        }
         rel = (Relation*) rel->table_next;
       }
       break;
     }
   }
+  #ifdef deb
+    printf("linear search done, no result\n");
+  #endif
   return 0;
 }
 //returns 0 if nothing is found, else it returns the pointer
@@ -146,11 +162,9 @@ Entity* get_entity_prev(String name, int pos)
 
 Relation* get_relation(String name)
 {
-  int pos = hash_function(name, ENTITY_TABLE_SIZE);
+  int pos = hash_function(name, RELATIONS_TABLE_SIZE);
   Relation* entity = (Relation*) global_hash_table_linear_search(name, pos, 1);
-  if (entity != 0)
-    return entity;
-  return 0;
+  return entity;
 }
 //check the hash table and see if the entity already exists,
 //return 0 if it does not, else return relation.
@@ -160,35 +174,53 @@ Entity* create_entity(String name)
   Entity* self;
   self = (Entity*) malloc(sizeof(Entity));
   strcpy(self->name, name);
+  self->table_next = NULL;
+  self->entity_id = 0;
+  self->valid = 1;
   return self;
 }
 //crea entità, assegna il nome e ritorna il puntatore.
+
+void reallocate_entity(Entity* self, String name)
+{
+  strcpy(self->name, name);
+  self->valid = 1;
+}
+
+void deallocate_entity(Entity* self)
+{
+  strcpy(self->name, "");
+  self->entity_id ++;
+  self->valid = 0;
+}
 
 Relation* create_relation(String name)
 {
   Relation* self;
   self = (Relation*) malloc(sizeof(Relation));
   strcpy(self->name, name);
+  self->table_next = NULL;
   return self;
 }
 //crea relazione, assegna il nome e ritorna il puntatore.
 
-SubRelation* create_sub_relation(Entity* e1, Entity* e2)
+SubRelation* create_sub_relation(Entity* src, Relation* rel)
 {
   SubRelation* self = (SubRelation*) malloc(sizeof(SubRelation));
-  self->source = e1;
-  self->destination = e2;
+  self->source = src;
+  self->relation = rel;
+  self->source_id = src->entity_id;
   self->table_next = NULL;
   return self;
 }
 
-int relation_add_entities(Relation* rel, Entity* e1, Entity* e2)
+int relation_add_entities(Relation* rel, Entity* src, Entity* dest)
 {
-  int pos = hash_function(e1->name, SUB_REL_TABLE_SIZE);
-  SubRelation** start = (SubRelation**) (rel->sub_relations+pos);
+  int pos = hash_function(src->name, SUB_REL_TABLE_SIZE);
+  SubRelation** start = (SubRelation**) (dest->sub_relations+pos);
   if (*start == NULL)
   {
-    *start = create_sub_relation(e1, e2);
+    *start = create_sub_relation(src, rel);
     #ifdef deb
       printf("Added entries to relation, first place\n");
     #endif
@@ -200,7 +232,7 @@ int relation_add_entities(Relation* rel, Entity* e1, Entity* e2)
     while(sub_rel != NULL)
     {
       prev_rel = sub_rel;
-      if (e1 == (sub_rel)->source && e2 == (sub_rel)->destination)
+      if (src == (sub_rel)->source && rel == (sub_rel)->relation)
       {
         #ifdef deb
           printf("Relation already exists.\n");
@@ -209,7 +241,7 @@ int relation_add_entities(Relation* rel, Entity* e1, Entity* e2)
       }
       sub_rel = (SubRelation*) sub_rel->table_next;
     }
-    sub_rel = create_sub_relation(e1, e2);
+    sub_rel = create_sub_relation(src, rel);
     prev_rel->table_next = sub_rel;
     #ifdef deb
       printf("Added entries to relation\n");
@@ -237,6 +269,14 @@ Entity* handle_entity_creation(String name)
     while (entity != NULL)
     {
       prev_entity = entity;
+      if (entity->valid == 0)
+      {
+        reallocate_entity(entity, name);
+        #ifdef deb
+          printf("Reallocated entity\n");
+        #endif
+        return entity;
+      }
       if (strcmp(name, entity->name) == 0)
       {
         #ifdef deb
@@ -313,7 +353,54 @@ Relation* handle_relation_creation(String name1, String name2, String name)
 //handle relation creation, return 0 if nothing was created, the relation
 //created or modified otherwise.
 
+SubRelation* delete_sub_relation(SubRelation* sub_rel)
+{
+  SubRelation* next = (SubRelation*) sub_rel->table_next;
+  free(sub_rel);
+  return next;
+}
+//deletes the specified sub relation, return the next pointer.
+//if there is no next pointer, return NULL.
+
+void delete_relation_stack(Entity* entity)
+{
+  SubRelation* next;
+  SubRelation** start;
+  for(int i=0; i<SUB_REL_TABLE_SIZE; i++)
+  {
+    start = (SubRelation**) (entity->sub_relations+i);
+    while (*start != NULL)
+    {
+      next = (SubRelation*) (*start)->table_next;
+      free(*start);
+      *start = next;
+      #ifdef deb
+        printf("deleted relation\n");
+      #endif
+    }
+  }
+}
+
 int delent_function(String name)
+{
+  Entity* entity = get_entity(name);
+  if (entity == 0)
+  {
+    #ifdef deb
+      printf("invalid entity.\n");
+    #endif
+    return 1;
+  }
+  delete_relation_stack(entity);
+  deallocate_entity(entity);
+  #ifdef deb
+    printf("deallocated entity at %x\n", entity);
+  #endif
+  return 0;
+}
+//return 0 if succes, else 1
+
+int delent_function_legacy(String name)
 {
   int pos = hash_function(name, ENTITY_TABLE_SIZE);
   if (entity_table[pos] == NULL)
@@ -325,14 +412,16 @@ int delent_function(String name)
   }
   if (strcmp(name, entity_table[pos]->name) == 0)
   {
+    delete_relation_stack(entity_table[pos]);
     if (entity_table[pos]->table_next != NULL)
     {
       #ifdef deb
-        printf("Deleting first value in hash table, has next.\n");
+        printf("Deallocating first value in hash table, has next.\n");
       #endif
       Entity* next = (Entity*) entity_table[pos]->table_next;
       free(entity_table[pos]);
       entity_table[pos] = next;
+      deallocate_entity(entity_table[pos]);
       return pos;
     }
     #ifdef deb
@@ -346,6 +435,7 @@ int delent_function(String name)
   {
     Entity* entity = get_entity_prev(name, pos);
     Entity* removed = (Entity*) entity->table_next;
+    delete_relation_stack(removed);
     if (entity != 0)
     {
       if (removed->table_next != NULL)
@@ -370,6 +460,68 @@ int delent_function(String name)
 }
 //returns the position in the hash table of the deleted entity.
 
+int delrel_function(String name_source, String name_dest, String rel_name)
+{
+  Relation* rel = get_relation(rel_name);
+  Entity* e1 = get_entity(name_source);
+  Entity* e_dest = get_entity(name_dest);
+
+  if (e1 == 0 || e_dest == 0 || rel == 0) //check if entities and relation exist.
+  {
+    #ifdef deb
+      printf("one of the entities does not exist\n");
+    #endif
+    return 0;
+  }
+
+  int sub_pos = hash_function(name_source, SUB_REL_TABLE_SIZE);
+  SubRelation** start = (SubRelation**) (e_dest->sub_relations+sub_pos);
+  if (*start != NULL)
+  {
+    SubRelation* sub_rel = *start;
+    SubRelation* prev_rel = NULL;
+    while(sub_rel != NULL)
+    {
+      if (sub_rel->source == e1 && sub_rel->relation == rel)
+      {
+        if (prev_rel == NULL)
+        {
+          *start = delete_sub_relation(sub_rel);
+          return sub_pos;
+        }
+        else
+        {
+          prev_rel->table_next = delete_sub_relation(sub_rel);
+          return sub_pos;
+        }
+      }
+      prev_rel = sub_rel;
+      sub_rel = (SubRelation*) sub_rel->table_next;
+    }
+  }
+  #ifdef deb
+    printf("no relation found.\n");
+  #endif
+  return sub_pos;
+}
+//return the postion of the relation in the sub array for the specific relation
+
+SubRelation* delete_obsolete_relation(int i, SubRelation* prev_rel, Entity* entity, SubRelation* sub_rel)
+{
+  if (prev_rel == NULL)
+  {
+    *(entity->sub_relations+i) = delete_sub_relation(sub_rel);
+    sub_rel = (SubRelation*) *(entity->sub_relations+i);
+  }
+  else
+  {
+    prev_rel->table_next = delete_sub_relation(sub_rel);
+    sub_rel = (SubRelation*) prev_rel->table_next;
+  }
+  return sub_rel;
+}
+//deletes an obsolete relation, returns the next relation.
+
 void report_function()
 {
 
@@ -381,52 +533,69 @@ void report_function()
 
 void deb_print_entities()
 {
+  Entity* entity;
   for (int i=0; i<ENTITY_TABLE_SIZE; i++)
   {
     if (entity_table[i] != NULL)
     {
-      Entity* entity = entity_table[i];
-      printf("%d: ", i);
-      while (entity != NULL)
+      if (entity_table[i]->valid == 1)
       {
-        printf("%s, ", entity->name);
-        entity = (Entity*) entity->table_next;
+        entity = entity_table[i];
+        printf("%d: ", i);
+        while (entity != NULL)
+        {
+          if (entity->valid == 1)
+            printf("%s [id = %d], ", entity->name, entity->entity_id);
+          entity = (Entity*) entity->table_next;
+        }
+        printf("\n");
       }
-      printf("\n");
     }
   }
 }
 
-void deb_print_sub_relations(Relation* relation)
+void deb_print_sub_relations(Entity* entity)
 {
-  Entity* e1;
-  Entity* e2;
+  Entity* src;
+  Relation* relation;
+  SubRelation* prev_rel;
   for (int i=0; i<SUB_REL_TABLE_SIZE; i++)
   {
-    SubRelation* sub_rel = (SubRelation*) *(relation->sub_relations+i);
+    SubRelation* sub_rel = (SubRelation*) *(entity->sub_relations+i);
+    prev_rel = NULL;
     while (sub_rel != NULL)
     {
-      e1 = sub_rel->source;
-      e2 = sub_rel->destination;
-      printf("    %s -> %s\n", e1->name, e2->name);
-      sub_rel = (SubRelation*) sub_rel->table_next;
+      src = sub_rel->source;
+      relation = sub_rel->relation;
+      if (src->valid == 1)
+      {
+        if (sub_rel->source_id == src->entity_id)
+        {
+          printf("%s --%s-> %s\n", src->name, relation->name, entity->name);
+          prev_rel = sub_rel;
+          sub_rel = (SubRelation*) sub_rel->table_next;
+        }
+        else
+          sub_rel = delete_obsolete_relation(i, prev_rel, entity, sub_rel);
+      }
+      else
+        sub_rel = delete_obsolete_relation(i, prev_rel, entity, sub_rel);
     }
   }
 }
 
 void deb_print_relations()
 {
-  for (int i=0; i<RELATIONS_TABLE_SIZE; i++)
+  Entity* dest;
+  for (int i=0; i<ENTITY_TABLE_SIZE; i++)
   {
-    if (relations_table[i] != NULL)
+    if (entity_table[i] != NULL)
     {
-      Relation* relation = relations_table[i];
-      printf("%d:\n", i);
-      while (relation != NULL)
+      dest = entity_table[i];
+      while (dest != NULL)
       {
-        printf("  %s:\n", relation->name);
-        deb_print_sub_relations(relation);
-        relation = (Relation*) relation->table_next;
+        deb_print_sub_relations(dest);
+        dest = (Entity*) dest->table_next;
       }
     }
   }
@@ -481,6 +650,7 @@ int main() //main program
         handle_entity_creation(argument0);
         #ifdef deb
           deb_print_entities();
+          deb_print_relations();
         #endif
         break;
       }
@@ -491,6 +661,7 @@ int main() //main program
         get_argument(input_string, argument2, opcode);
         handle_relation_creation(argument0, argument1, argument2);
         #ifdef deb
+          deb_print_entities();
           deb_print_relations();
         #endif
         break;
@@ -499,6 +670,10 @@ int main() //main program
       {
         get_argument(input_string, argument0, 7);
         delent_function(argument0);
+        #ifdef deb
+          deb_print_entities();
+          deb_print_relations();
+        #endif
         break;
       }
       case 3: //delrel
@@ -506,7 +681,11 @@ int main() //main program
         opcode = get_argument(input_string, argument0, 7);
         opcode = get_argument(input_string, argument1, opcode);
         get_argument(input_string, argument2, opcode);
-
+        delrel_function(argument0, argument1, argument2);
+        #ifdef deb
+          deb_print_entities();
+          deb_print_relations();
+        #endif
         break;
       }
       case 4: //report
