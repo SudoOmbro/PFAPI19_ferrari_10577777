@@ -15,13 +15,19 @@ typedef char String[50];
 
 typedef struct {
   String name;
-  void* most_popular_entity;  //MSE*
+  int value;  //value of the string - for ordering.
+  void* ordered_relation; //OrdRel*
   void* table_next; //Relation*
 } Relation;
 
 typedef struct {
+  Relation* relation; //points to the relation in hash table
+  void* next;
+} OrdRel; //for speed and redundancy
+
+typedef struct {
   String name;
-  void* sub_relations[SUB_REL_TABLE_SIZE];  //SubRelation*
+  void* sub_relations[SUB_REL_TABLE_SIZE];  //in relations
   int entity_id; //add 1 when entity changes.
   int valid;     // = 1 when valid, else = 0.
   void* table_next; //Entity*
@@ -34,14 +40,10 @@ typedef struct {
   void* table_next; //SubRelation*
 } SubRelation;  //the destination is the entity that contains it.
 
-typedef struct {
-  Entity* entity;
-  int times;
-  void* next; //MSE*
-} MSE;
-
 Entity* entity_table[ENTITY_TABLE_SIZE];          // = table 0
 Relation* relations_table[RELATIONS_TABLE_SIZE];  // = table 1
+
+OrdRel* rel_list_head = NULL;
 
 //------------------------------------------------------------------------------
 //functions definitions---------------------------------------------------------
@@ -196,10 +198,54 @@ void deallocate_entity(Entity* self)
 
 Relation* create_relation(String name)
 {
+  //create the relation to put in hash table
   Relation* self;
   self = (Relation*) malloc(sizeof(Relation));
   strcpy(self->name, name);
   self->table_next = NULL;
+  //calculate value of the string
+  int byte = 0;
+  self->value = 0;
+  while (name[byte] != '\0')
+  {
+    self->value += name[byte];
+    byte ++;
+  }
+  #ifdef deb
+    printf("value: %d\n", self->value);
+  #endif
+  //create entry in the ordered relation list
+  OrdRel* ord = (OrdRel*) malloc(sizeof(OrdRel));
+  ord->relation = self;
+  self->ordered_relation = ord;
+  OrdRel* pointer = rel_list_head;
+  OrdRel* prev_pointer = NULL;
+
+  while (pointer != NULL)
+  {
+    printf("aa\n");
+    if ((pointer->relation)->value > self->value)
+    {
+      if (prev_pointer == NULL)
+      {
+        ord->next = rel_list_head;
+        rel_list_head = ord;
+        return self;
+      }
+      prev_pointer->next = ord;
+      ord->next = pointer;
+      return self;
+    }
+    prev_pointer = pointer;
+    pointer = (OrdRel*) pointer->next;
+  }
+
+  if (prev_pointer == NULL)
+    rel_list_head = ord;
+  else
+    prev_pointer->next = ord;
+  ord->next = NULL;
+
   return self;
 }
 //crea relazione, assegna il nome e ritorna il puntatore.
@@ -601,6 +647,16 @@ void deb_print_relations()
   }
 }
 
+void deb_print_ordered_relations()
+{
+  OrdRel* pointer = rel_list_head;
+  while(pointer != NULL)
+  {
+    printf("%s\n", (pointer->relation)->name);
+    pointer = (OrdRel*) pointer->next;
+  }
+}
+
 #endif
 
 //------------------------------------------------------------------------------
@@ -663,6 +719,7 @@ int main() //main program
         #ifdef deb
           deb_print_entities();
           deb_print_relations();
+          deb_print_ordered_relations();
         #endif
         break;
       }
