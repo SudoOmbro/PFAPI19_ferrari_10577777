@@ -609,9 +609,7 @@ int report_function()
   //if there are no relations, do nothing
   if (rel_list_head == NULL)
   {
-    #ifdef deb
-      printf("nothing to report.\n");
-    #endif
+    printf("none\n");
     return 0;
   }
 
@@ -860,9 +858,6 @@ int report_function()
   ord_rel = rel_list_head;
   while(ord_rel != NULL)
   {
-    #ifdef deb
-      printf("\n");
-    #endif
     //print required stuff
     print_word((ord_rel->relation)->name);
     int pos = ord_rel->position;
@@ -876,10 +871,9 @@ int report_function()
       free(pop_entity);
       pop_entity = pe;
     }
-    printf("%d; ", max);
+    printf("%d;\n", max);
     ord_rel = (OrdRel*) ord_rel->next;
   }
-  printf("\n");
   return 0;
 }
 
