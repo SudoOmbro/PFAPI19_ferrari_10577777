@@ -6,7 +6,7 @@
 #define ENTITY_TABLE_SIZE 91711
 #define RELATIONS_TABLE_SIZE 43
 
-/* add -Ddeb to gcc compiler options to launch in verbose debug mode */
+/* add -Ddeb to gcc compiler options to compile in verbose debug mode */
 
 //type definitions--------------------------------------------------------------
 
@@ -16,7 +16,7 @@ typedef char String[50];
 typedef struct {
   String name;
   int hash_value;
-  void* ordered_relation; //OrdRel*
+  void* ordered_relation; //points to the ordered relation.
   void* table_next; //Relation*
   void* table_prev; //Relation*
 } Relation;
@@ -24,6 +24,7 @@ typedef struct {
 typedef struct {
   Relation* relation; //points to the relation in hash table
   int value;  //value of the string - for ordering.
+  int position; //position in the list
   void* next;  //OrdRel*
   void* prev;  //OrdRel*
 } OrdRel; //for speed and redundancy
@@ -33,6 +34,7 @@ typedef struct {
   void* sub_relations[SUB_REL_TABLE_SIZE];  //in relations
   int entity_id; //add 1 when entity changes.
   int valid;     // = 1 when valid, else = 0.
+  int value;
   void* table_next; //Entity*
 } Entity;
 
@@ -42,6 +44,12 @@ typedef struct {
   int source_id;
   void* table_next; //SubRelation*
 } SubRelation;  //the destination is the entity that contains it.
+
+typedef struct {
+  Entity* entity;
+  int occurrences;
+  void* next;
+} PopEntity; //struct used during report
 
 Entity* entity_table[ENTITY_TABLE_SIZE];          // = table 0
 Relation* relations_table[RELATIONS_TABLE_SIZE];  // = table 1
@@ -88,7 +96,19 @@ int get_argument(LongString input_string, char* dest_string, int start_pos)
 //dest_string (argomento) con la stringa trovata a partire da start_pos
 //fino ad uno spazio.
 
-void* global_hash_table_linear_search(String name, int table_pos, int table)
+int string_get_value(String name)
+{
+  int value, byte = 0;
+  while (name[byte] != '\0')
+  {
+    value += name[byte]*(byte+1);
+    byte ++;
+  }
+  return value;
+}
+//returns the value of the given string, used for alphabetical ordering.
+
+void* global_hash_table_linear_search(String name, int table_pos, const int table)
 {
   switch(table)
   {
@@ -183,6 +203,7 @@ Entity* create_entity(String name)
   self->table_next = NULL;
   self->entity_id = 0;
   self->valid = 1;
+  self->value = string_get_value(name);
   return self;
 }
 //crea entità, assegna il nome e ritorna il puntatore.
@@ -191,6 +212,7 @@ void reallocate_entity(Entity* self, String name)
 {
   strcpy(self->name, name);
   self->valid = 1;
+  self->value = string_get_value(name);
 }
 
 void deallocate_entity(Entity* self)
@@ -199,6 +221,18 @@ void deallocate_entity(Entity* self)
   self->entity_id ++;
   self->valid = 0;
 }
+
+void ordered_relation_list_fixup(OrdRel* start_rel, int pos)
+{
+  OrdRel* rel = start_rel;
+  while (rel != NULL)
+  {
+    rel->position = pos;
+    pos ++;
+    rel = (OrdRel*) rel->next;
+  }
+}
+//fixes the order of the ordered list from the indicated starting position
 
 Relation* create_relation(String name, int hash)
 {
@@ -209,7 +243,6 @@ Relation* create_relation(String name, int hash)
   self->hash_value = hash;
   self->table_next = NULL;
   self->table_prev = NULL;
-  number_of_relations ++;
   //create ordered list entry
   OrdRel* ord = (OrdRel*) malloc(sizeof(OrdRel));
   ord->relation = self;
@@ -217,13 +250,7 @@ Relation* create_relation(String name, int hash)
   OrdRel* pointer = rel_list_head;
   OrdRel* prev_pointer = NULL;
   //calculate value of the string
-  int byte = 0;
-  ord->value = 0;
-  while (name[byte] != '\0')
-  {
-    ord->value += name[byte];
-    byte ++;
-  }
+  ord->value = string_get_value(name);
   #ifdef deb
     printf("value: %d\n", ord->value);
   #endif
@@ -238,11 +265,15 @@ Relation* create_relation(String name, int hash)
         ord->next = rel_list_head;
         ord->prev = NULL;
         rel_list_head = ord;
+        ordered_relation_list_fixup(ord, 0);
+        number_of_relations ++;
         return self;
       }
       prev_pointer->next = ord;
       ord->prev = prev_pointer;
       ord->next = pointer;
+      ordered_relation_list_fixup(ord, prev_pointer->position+1);
+      number_of_relations ++;
       return self;
     }
     prev_pointer = pointer;
@@ -253,14 +284,16 @@ Relation* create_relation(String name, int hash)
   {
     rel_list_head = ord;
     ord->prev = NULL;
+    ord->position = 0;
   }
   else
   {
     prev_pointer->next = ord;
     ord->prev = prev_pointer;
+    ord->position = number_of_relations;
   }
   ord->next = NULL;
-
+  number_of_relations ++;
   return self;
 }
 //Create relation in hash table, create relation in ordered list and
@@ -444,6 +477,7 @@ void delete_relation_stack(Entity* entity)
     }
   }
 }
+//delete all the relations towards the deleted entity.
 
 int delent_function(String name)
 {
@@ -462,7 +496,7 @@ int delent_function(String name)
   #endif
   return 0;
 }
-//return 0 if succes, else 1
+//deallocates an entity; return 0 if succes, else 1
 
 int delrel_function(String name_source, String name_dest, String rel_name)
 {
@@ -527,7 +561,7 @@ SubRelation* delete_obsolete_relation(int i, SubRelation* prev_rel, Entity* enti
 //deletes an obsolete sub relation, returns the next relation (if there is no
 //next it returns NULL).
 
-void delete_unused_relation(Relation* rel)
+OrdRel* delete_unused_relation(Relation* rel)
 {
   //setup pointers
   Relation* rel_prev = (Relation*) rel->table_prev;
@@ -549,16 +583,260 @@ void delete_unused_relation(Relation* rel)
   free(ord_rel);
   //decrease counter
   number_of_relations --;
+  return ord_rel_next;
 }
 //if it detects that a relation has 0 instances, it deletes it;
 //called from report_function.
 
-void report_function()
+PopEntity* create_pop_entity(Entity* entity)
 {
-  for (int i=0; i<ENTITY_TABLE_SIZE; i++)
-  {
+  PopEntity* pop = (PopEntity*) malloc(sizeof(PopEntity));
+  pop->entity = entity;
+  pop->occurrences = 1;
+  pop->next = NULL;
+  return pop;
+}
 
+void print_word(String word)
+{
+  printf("\"");
+  printf("%s", word);
+  printf("\" ");
+}
+//print a word in the desired format.
+
+int report_function()
+{
+  //if there are no relations, do nothing
+  if (rel_list_head == NULL)
+  {
+    #ifdef deb
+      printf("nothing to report.\n");
+    #endif
+    return 0;
   }
+
+  Entity* entity;
+  Entity* src;
+  Relation* relation;
+  SubRelation* prev_rel;
+  SubRelation* sub_rel;
+
+  int i, j, position;
+  int max_value[number_of_relations];
+  PopEntity* popular_entities_temp[number_of_relations];
+
+  for (i=0; i<number_of_relations; i++)
+    popular_entities_temp[i] = NULL;
+
+  //set all the maximums to 0
+  for (i=0; i<number_of_relations; i++)
+    max_value[i] = 0;
+    #ifdef deb
+      printf("starting phase one.\n");
+    #endif
+  for (j=0; j<ENTITY_TABLE_SIZE; j++)
+  {
+    //load the entities popularity for each relation in the temp array
+    if (entity_table[j] != NULL)
+    {
+      entity = entity_table[j];
+      while (entity != NULL)
+      {
+        #ifdef deb
+          printf("found an entity\n");
+        #endif
+        if (entity->valid == 1)
+        {
+          #ifdef deb
+            printf("the entity is valid\n");
+          #endif
+          for (int i=0; i<SUB_REL_TABLE_SIZE; i++)
+          {
+            sub_rel = (SubRelation*) *(entity->sub_relations+i);
+            prev_rel = NULL;
+            while (sub_rel != NULL)
+            {
+              #ifdef deb
+                printf("found a relation\n");
+              #endif
+              src = sub_rel->source;
+              relation = sub_rel->relation;
+              if (src->valid == 1)
+              {
+                if (sub_rel->source_id == src->entity_id)
+                {
+                  #ifdef deb
+                    printf("the relation is valid\n");
+                  #endif
+                  position = ((OrdRel*)(relation->ordered_relation))->position;
+                  if (popular_entities_temp[position] == NULL)
+                  {
+                    popular_entities_temp[position] = create_pop_entity(entity);
+                    max_value[position] = 1;
+                    #ifdef deb
+                      printf("max[%d] = %d\n", position, max_value[position]);
+                    #endif
+                  }
+                  else
+                  {
+                    PopEntity* pe = popular_entities_temp[position];
+                    PopEntity* pe_prev;
+                    while(pe != NULL)
+                    {
+                      if (pe->entity == entity)
+                      {
+                        pe->occurrences ++;
+                        if (max_value[position] < pe->occurrences)
+                        {
+                          max_value[position] = pe->occurrences;
+                          #ifdef deb
+                            printf("max[%d] = %d\n", position, max_value[position]);
+                          #endif
+                        }
+                        break;
+                      }
+                      pe_prev = pe;
+                      pe = (PopEntity*) pe->next;
+                    }
+                    if (pe == NULL)
+                      pe_prev->next = create_pop_entity(entity);
+                  }
+                  prev_rel = sub_rel;
+                  sub_rel = (SubRelation*) sub_rel->table_next;
+                }
+                else
+                  sub_rel = delete_obsolete_relation(i, prev_rel, entity, sub_rel);
+              }
+              else
+                sub_rel = delete_obsolete_relation(i, prev_rel, entity, sub_rel);
+            }
+          }
+        }
+        entity = (Entity*) entity->table_next;
+      }
+    }
+  }
+  #ifdef deb
+    printf("phase one finished, starting phase two.\n");
+  #endif
+  OrdRel* ord_rel = rel_list_head;
+  int old_nor = number_of_relations;
+  while(ord_rel != NULL)
+  {
+    #ifdef deb
+      printf("found relation\n");
+    #endif
+    //if the max value for a relation is zero, it gets eliminated.
+    if (max_value[ord_rel->position] == 0)
+    {
+      #ifdef deb
+        printf("deleting unused relation\n");
+      #endif
+      ord_rel = delete_unused_relation(ord_rel->relation);
+    }
+    else
+    {
+      #ifdef deb
+        printf("relation is fine\n");
+      #endif
+      ord_rel = (OrdRel*) ord_rel->next;
+    }
+  }
+
+  PopEntity* popular_entities[number_of_relations];
+  for (i=0; i<number_of_relations; i++)
+    popular_entities[i] = NULL;
+
+  PopEntity* pop_entity;
+  ord_rel = rel_list_head;
+  j = 0;
+  #ifdef deb
+    printf("phase two finished, starting phase three.\n");
+  #endif
+  for (i=0; i<old_nor; i++)
+  {
+    //add the ordered maximums to the final array
+    if (max_value[i] != 0)
+    {
+      PopEntity* pe;
+      pop_entity = popular_entities_temp[i];
+      while(pop_entity != NULL)
+      {
+        #ifdef deb
+          printf("found entity\n");
+        #endif
+        if (pop_entity->occurrences == max_value[i])
+        {
+          #ifdef deb
+            printf("entity is a maximum\n");
+          #endif
+          if (popular_entities[j] == NULL)
+          {
+            popular_entities[j] = create_pop_entity(pop_entity->entity);
+            popular_entities[j]->occurrences = max_value[i];
+          }
+          else
+          {
+            PopEntity* pe_prev = NULL;
+            pe = popular_entities[j];
+            while(pe != NULL)
+            {
+              if (((Entity*)(pop_entity->entity))->value < ((Entity*)(pe->entity))->value)
+              {
+                if (pe_prev == NULL)
+                {
+                  popular_entities[j] = create_pop_entity(pop_entity->entity);
+                  popular_entities[j]->next = pe;
+                  break;
+                }
+                else
+                {
+                  pe_prev->next = create_pop_entity(pop_entity->entity);
+                  (((PopEntity*)(pe_prev->next))->next) = pe;
+                  break;
+                }
+              }
+              pe_prev = pe;
+              pe = (PopEntity*) pe->next;
+            }
+          }
+        }
+        pe = (PopEntity*) pop_entity->next;
+        free(pop_entity);
+        pop_entity = pe;
+      }
+
+      j ++;
+
+    }
+  }
+  #ifdef deb
+    printf("final phase:\n");
+  #endif
+  ord_rel = rel_list_head;
+  while(ord_rel != NULL)
+  {
+    #ifdef deb
+      printf("\n");
+    #endif
+    //print required stuff
+    print_word((ord_rel->relation)->name);
+    int pos = ord_rel->position;
+    pop_entity = popular_entities[pos];
+    int max = pop_entity->occurrences;
+    PopEntity* pe;
+    while (pop_entity != NULL)
+    {
+      print_word((pop_entity->entity)->name);
+      pe = (PopEntity*) pop_entity->next;
+      free(pop_entity);
+      pop_entity = pe;
+    }
+    printf("%d;", max);
+  }
+  printf("\n");
+  return 0;
 }
 
 //debug functions---------------------------------------------------------------
@@ -572,8 +850,6 @@ void deb_print_entities()
   {
     if (entity_table[i] != NULL)
     {
-      if (entity_table[i]->valid == 1)
-      {
         entity = entity_table[i];
         printf("%d: ", i);
         while (entity != NULL)
@@ -583,7 +859,6 @@ void deb_print_entities()
           entity = (Entity*) entity->table_next;
         }
         printf("\n");
-      }
     }
   }
 }
@@ -640,7 +915,7 @@ void deb_print_ordered_relations()
   OrdRel* pointer = rel_list_head;
   while(pointer != NULL)
   {
-    printf("%s\n", (pointer->relation)->name);
+    printf("%d: %s\n", pointer->position, (pointer->relation)->name);
     pointer = (OrdRel*) pointer->next;
   }
 }
