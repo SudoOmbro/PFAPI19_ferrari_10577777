@@ -599,7 +599,7 @@ PopEntity* create_pop_entity(Entity* entity)
 void print_word(String word)
 {
   printf("\"");
-  printf("%s", word);
+  printf("%s ", word);
   printf("\" ");
 }
 //print a word in the desired format.
@@ -859,14 +859,14 @@ int report_function()
   while(ord_rel != NULL)
   {
     //print required stuff
-    print_word((ord_rel->relation)->name);
+    printf("%s ", (ord_rel->relation)->name);
     int pos = ord_rel->position;
     pop_entity = popular_entities[pos];
     int max = pop_entity->occurrences;
     PopEntity* pe;
     while (pop_entity != NULL)
     {
-      print_word((pop_entity->entity)->name);
+      printf("%s ", (pop_entity->entity)->name);
       pe = (PopEntity*) pop_entity->next;
       free(pop_entity);
       pop_entity = pe;
