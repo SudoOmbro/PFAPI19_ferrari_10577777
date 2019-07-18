@@ -101,7 +101,7 @@ int string_get_value(String name)
   int value, byte = 0;
   while (name[byte] != '\0')
   {
-    value += name[byte]*(byte+1);
+    value += name[byte]/(byte+1);
     byte ++;
   }
   return value;
@@ -257,7 +257,6 @@ Relation* create_relation(String name, int hash)
   //put entry in ordered list
   while (pointer != NULL)
   {
-    printf("aa\n");
     if (pointer->value > ord->value)
     {
       if (prev_pointer == NULL)
@@ -666,16 +665,17 @@ int report_function()
               {
                 if (sub_rel->source_id == src->entity_id)
                 {
-                  #ifdef deb
-                    printf("the relation is valid\n");
-                  #endif
                   position = ((OrdRel*)(relation->ordered_relation))->position;
+                  #ifdef deb
+                    printf("the relation is valid, pos: %d\n", position);
+                  #endif
                   if (popular_entities_temp[position] == NULL)
                   {
                     popular_entities_temp[position] = create_pop_entity(entity);
                     max_value[position] = 1;
                     #ifdef deb
                       printf("max[%d] = %d\n", position, max_value[position]);
+                      printf("entity added: %s\n", (popular_entities_temp[position]->entity)->name);
                     #endif
                   }
                   else
@@ -691,16 +691,28 @@ int report_function()
                         {
                           max_value[position] = pe->occurrences;
                           #ifdef deb
+                            printf("entity found: %s\n", (pe->entity)->name);
                             printf("max[%d] = %d\n", position, max_value[position]);
                           #endif
                         }
                         break;
                       }
+                      else
+                      {
+                        #ifdef deb
+                          printf("%s, ", (pe->entity)->name);
+                        #endif
+                      }
                       pe_prev = pe;
                       pe = (PopEntity*) pe->next;
                     }
                     if (pe == NULL)
+                    {
                       pe_prev->next = create_pop_entity(entity);
+                      #ifdef deb
+                        printf("entity created: %s\n", (((PopEntity*)pe_prev->next)->entity)->name);
+                      #endif
+                    }
                   }
                   prev_rel = sub_rel;
                   sub_rel = (SubRelation*) sub_rel->table_next;
@@ -718,6 +730,20 @@ int report_function()
     }
   }
   #ifdef deb
+    for (i=0; i<number_of_relations; i++)
+    {
+      printf("%d: ", i);
+      if (popular_entities_temp[i] != NULL)
+      {
+        PopEntity* tmp = popular_entities_temp[i];
+        while (tmp !=  NULL)
+        {
+          printf("%s, %d; ", (tmp->entity)->name, tmp->occurrences);
+          tmp = tmp->next;
+        }
+      }
+      printf("\n");
+    }
     printf("phase one finished, starting phase two.\n");
   #endif
   OrdRel* ord_rel = rel_list_head;
@@ -782,7 +808,7 @@ int report_function()
             pe = popular_entities[j];
             while(pe != NULL)
             {
-              if (((Entity*)(pop_entity->entity))->value < ((Entity*)(pe->entity))->value)
+              if (((Entity*)(pop_entity->entity))->value > ((Entity*)(pe->entity))->value)
               {
                 if (pe_prev == NULL)
                 {
@@ -800,6 +826,8 @@ int report_function()
               pe_prev = pe;
               pe = (PopEntity*) pe->next;
             }
+            if (pe == NULL)
+              pe_prev->next = create_pop_entity(pop_entity->entity);
           }
         }
         pe = (PopEntity*) pop_entity->next;
@@ -812,8 +840,23 @@ int report_function()
     }
   }
   #ifdef deb
-    printf("final phase:\n");
+    for (i=0; i<number_of_relations; i++)
+    {
+      printf("%d: ", i);
+      if (popular_entities[i] != NULL)
+      {
+        PopEntity* tmp = popular_entities[i];
+        while (tmp !=  NULL)
+        {
+          printf("%s, %d; ", (tmp->entity)->name, tmp->occurrences);
+          tmp = tmp->next;
+        }
+      }
+      printf("\n");
+    }
+    printf("\nfinal phase:\n");
   #endif
+  ordered_relation_list_fixup(rel_list_head, 0);
   ord_rel = rel_list_head;
   while(ord_rel != NULL)
   {
@@ -833,7 +876,8 @@ int report_function()
       free(pop_entity);
       pop_entity = pe;
     }
-    printf("%d;", max);
+    printf("%d; ", max);
+    ord_rel = (OrdRel*) ord_rel->next;
   }
   printf("\n");
   return 0;
