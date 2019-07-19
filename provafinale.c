@@ -690,7 +690,7 @@ int report_function()
                       printf("first position is not free\n");
                     #endif
                     PopEntity* pe = popular_entities_temp[position];
-                    PopEntity* pe_prev;
+                    PopEntity* pe_prev = NULL;
                     PopEntity* destination;
                     while(pe != NULL)
                     {
@@ -742,15 +742,28 @@ int report_function()
                       //add a popular entity.
                       if (destination == NULL)
                       {
-                        pe = popular_entities_temp[0];
-                        popular_entities_temp[0] = create_pop_entity(entity);
-                        popular_entities_temp[0]->next = pe;
+                        pe = popular_entities_temp[position];
+                        popular_entities_temp[position] = create_pop_entity(entity);
+                        popular_entities_temp[position]->next = pe;
+                        #ifdef deb
+                          printf("putting entity first\n");
+                          char* start = (popular_entities_temp[position]->entity)->name;
+                          char* next = (((PopEntity*)popular_entities_temp[position]->next)->entity)->name;
+                          printf("start: %s, next: %s\n", start, next);
+                        #endif
                       }
                       else
                       {
                         pe = (PopEntity*) destination->next;
                         destination->next = create_pop_entity(entity);
                         ((PopEntity*) destination->next)->next = pe;
+                        #ifdef deb
+                          printf("putting entity in the middle\n");
+                          char* prev = (destination->entity)->name;
+                          char* current = (((PopEntity*)destination->next)->entity)->name;
+                          char* next = (pe->entity)->name;
+                          printf("start: %s, current: %s, next: %s\n", prev, current, next);
+                        #endif
                       }
                     }
                   }
