@@ -23,7 +23,6 @@ typedef struct {
 
 typedef struct {
   Relation* relation; //points to the relation in hash table
-  int value;  //value of the string - for ordering.
   int position; //position in the list
   void* next;  //OrdRel*
   void* prev;  //OrdRel*
@@ -31,11 +30,18 @@ typedef struct {
 
 typedef struct {
   String name;
+
+  int sub_relations_number;
   void* sub_relations[SUB_REL_TABLE_SIZE];  //in relations
+  int first_sub_rel;
+  int last_sub_rel;
+
   int entity_id; //add 1 when entity changes.
   int valid;     // = 1 when valid, else = 0.
-  int value;
   void* table_next; //Entity*
+
+  void* array;  //for speedup
+  int array_position;
 } Entity;
 
 typedef struct {
@@ -56,6 +62,9 @@ Relation* relations_table[RELATIONS_TABLE_SIZE];  // = table 1
 
 OrdRel* rel_list_head = NULL;
 int number_of_relations = 0;
+
+int number_of_entities = 0;
+Entity* entities_array_first;
 
 //------------------------------------------------------------------------------
 //functions definitions---------------------------------------------------------
@@ -95,18 +104,6 @@ int get_argument(LongString input_string, char* dest_string, int start_pos)
 //data in ingresso la stringa in stdin, la analizza e riempie la stringa
 //dest_string (argomento) con la stringa trovata a partire da start_pos
 //fino ad uno spazio.
-
-int string_get_value(String name)
-{
-  int value, byte = 0;
-  while (name[byte] != '\0')
-  {
-    value += name[byte]/(byte+1);
-    byte ++;
-  }
-  return value;
-}
-//returns the value of the given string, used for alphabetical ordering.
 
 void* global_hash_table_linear_search(String name, int table_pos, const int table)
 {
@@ -203,7 +200,7 @@ Entity* create_entity(String name)
   self->table_next = NULL;
   self->entity_id = 0;
   self->valid = 1;
-  self->value = string_get_value(name);
+  number_of_entities ++;
   return self;
 }
 //crea entità, assegna il nome e ritorna il puntatore.
@@ -212,12 +209,11 @@ void reallocate_entity(Entity* self, String name)
 {
   strcpy(self->name, name);
   self->valid = 1;
-  self->value = string_get_value(name);
 }
 
 void deallocate_entity(Entity* self)
 {
-  strcpy(self->name, "");
+  //strcpy(self->name, "");
   self->entity_id ++;
   self->valid = 0;
 }
@@ -249,15 +245,10 @@ Relation* create_relation(String name, int hash)
   self->ordered_relation = ord;
   OrdRel* pointer = rel_list_head;
   OrdRel* prev_pointer = NULL;
-  //calculate value of the string
-  ord->value = string_get_value(name);
-  #ifdef deb
-    printf("value: %d\n", ord->value);
-  #endif
   //put entry in ordered list
   while (pointer != NULL)
   {
-    if (pointer->value > ord->value)
+    if (strcmp(self->name, (pointer->relation)->name) < 0)
     {
       if (prev_pointer == NULL)
       {
@@ -806,18 +797,21 @@ int report_function()
             pe = popular_entities[j];
             while(pe != NULL)
             {
-              if (((Entity*)(pop_entity->entity))->value > ((Entity*)(pe->entity))->value)
+              if (strcmp(((Entity*)(pop_entity->entity))->name, ((Entity*)(pe->entity))->name) < 0)
               {
                 if (pe_prev == NULL)
                 {
                   popular_entities[j] = create_pop_entity(pop_entity->entity);
+                  popular_entities[j]->occurrences = max_value[i];
                   popular_entities[j]->next = pe;
                   break;
                 }
                 else
                 {
-                  pe_prev->next = create_pop_entity(pop_entity->entity);
-                  (((PopEntity*)(pe_prev->next))->next) = pe;
+                  PopEntity* tmp =create_pop_entity(pop_entity->entity);
+                  pe_prev->next = tmp;
+                  tmp->next = pe;
+                  tmp->occurrences = max_value[i];
                   break;
                 }
               }
@@ -871,9 +865,10 @@ int report_function()
       free(pop_entity);
       pop_entity = pe;
     }
-    printf("%d;\n", max);
+    printf("%d; ", max);
     ord_rel = (OrdRel*) ord_rel->next;
   }
+  printf("\n");
   return 0;
 }
 
@@ -1014,7 +1009,7 @@ int main() //main program
         get_argument(input_string, argument0, 7);
         handle_entity_creation(argument0);
         #ifdef deb
-          deb_print_all();
+          deb_print_entities();
         #endif
         break;
       }
@@ -1025,7 +1020,7 @@ int main() //main program
         get_argument(input_string, argument2, opcode);
         handle_relation_creation(argument0, argument1, argument2);
         #ifdef deb
-          deb_print_all();
+          deb_print_relations();
         #endif
         break;
       }
@@ -1034,7 +1029,7 @@ int main() //main program
         get_argument(input_string, argument0, 7);
         delent_function(argument0);
         #ifdef deb
-          deb_print_all();
+          deb_print_entities();
         #endif
         break;
       }
@@ -1045,7 +1040,7 @@ int main() //main program
         get_argument(input_string, argument2, opcode);
         delrel_function(argument0, argument1, argument2);
         #ifdef deb
-          deb_print_all();
+          deb_print_relations();
         #endif
         break;
       }
