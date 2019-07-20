@@ -5,7 +5,6 @@
 #define SUB_REL_TABLE_SIZE 499
 #define ENTITY_TABLE_SIZE 91711
 #define RELATIONS_TABLE_SIZE 353
-#define ENT_ARRAY_SIZE 1024
 
 /* add -Ddeb to gcc compiler options to compile in verbose debug mode */
 
@@ -17,6 +16,7 @@ typedef char String[50];
 typedef struct {
   String name;
   int hash_value;
+  void* first_sub_relation;
   void* ordered_relation; //points to the ordered relation.
   void* table_next; //Relation*
   void* table_prev; //Relation*
@@ -33,24 +33,29 @@ typedef struct {
   String name;
 
   int sub_relations_number;
-  void* sub_relations[SUB_REL_TABLE_SIZE];  //in relations
+  void* sub_relations_out[SUB_REL_TABLE_SIZE];  //relations going out
+  void* sub_relations_in[SUB_REL_TABLE_SIZE];  //relations going out
   int first_sub_rel;
   int last_sub_rel;
 
   int entity_id; //add 1 when entity changes.
   int valid;     // = 1 when valid, else = 0.
   void* table_next; //Entity*
-
-  void* array;  //for speedup
-  int array_position;
 } Entity;
 
 typedef struct {
   Relation* relation;
   Entity* source;
+  Entity* destination;
   int source_id;
+  int valid;
   void* table_next; //SubRelation*
 } SubRelation;  //the destination is the entity that contains it.
+
+typedef struct {
+  SubRelation* rel;
+  void* next;
+} SubRelation_pointer;
 
 typedef struct {
   Entity* entity;
@@ -58,14 +63,13 @@ typedef struct {
   void* next;
 } PopEntity; //struct used during report
 
+int first_entity_position = ENTITY_TABLE_SIZE;
+int last_entity_position = 0;
 Entity* entity_table[ENTITY_TABLE_SIZE];          // = table 0
 Relation* relations_table[RELATIONS_TABLE_SIZE];  // = table 1
 
 OrdRel* rel_list_head = NULL;
 int number_of_relations = 0;
-
-int number_of_entities = 0;
-Entity* entities_array_first;
 
 //------------------------------------------------------------------------------
 //functions definitions---------------------------------------------------------
@@ -193,7 +197,7 @@ Relation* get_relation(String name)
 //check the hash table and see if the entity already exists,
 //return 0 if it does not, else return relation.
 
-Entity* create_entity(String name)
+Entity* create_entity(String name, int table_pos)
 {
   //create the entity in the hash table
   Entity* self;
@@ -204,8 +208,11 @@ Entity* create_entity(String name)
   self->valid = 1;
   self->first_sub_rel = SUB_REL_TABLE_SIZE;
   self->last_sub_rel = 0;
-  number_of_entities ++;
-  //add entity to entity array
+
+  if (table_pos > last_entity_position)
+    last_entity_position = table_pos;
+  if (table_pos < first_entity_position)
+    first_entity_position = table_pos;
 
   return self;
 }
@@ -219,11 +226,11 @@ void reallocate_entity(Entity* self, String name)
 
 void deallocate_entity(Entity* self)
 {
-  //strcpy(self->name, "");
   self->entity_id ++;
   self->valid = 0;
   self->first_sub_rel = SUB_REL_TABLE_SIZE;
   self->last_sub_rel = 0;
+  strcpy(self->name, "");
 }
 
 void ordered_relation_list_fixup(OrdRel* start_rel, int pos)
@@ -251,6 +258,7 @@ Relation* create_relation(String name, int hash)
   OrdRel* ord = (OrdRel*) malloc(sizeof(OrdRel));
   ord->relation = self;
   self->ordered_relation = ord;
+  self->first_sub_relation = NULL;
   OrdRel* pointer = rel_list_head;
   OrdRel* prev_pointer = NULL;
   //put entry in ordered list
@@ -263,14 +271,14 @@ Relation* create_relation(String name, int hash)
         ord->next = rel_list_head;
         ord->prev = NULL;
         rel_list_head = ord;
-        ordered_relation_list_fixup(ord, 0);
+        //ordered_relation_list_fixup(ord, 0);
         number_of_relations ++;
         return self;
       }
       prev_pointer->next = ord;
       ord->prev = prev_pointer;
       ord->next = pointer;
-      ordered_relation_list_fixup(ord, prev_pointer->position+1);
+      //ordered_relation_list_fixup(ord, prev_pointer->position+1);
       number_of_relations ++;
       return self;
     }
@@ -297,12 +305,14 @@ Relation* create_relation(String name, int hash)
 //Create relation in hash table, create relation in ordered list and
 //return the pointer to the relation in hash table.
 
-SubRelation* create_sub_relation(Entity* src, Relation* rel)
+SubRelation* create_sub_relation(Entity* src, Relation* rel, Entity* dest)
 {
   SubRelation* self = (SubRelation*) malloc(sizeof(SubRelation));
   self->source = src;
   self->relation = rel;
+  self->destination = dest;
   self->source_id = src->entity_id;
+  self->valid = 1;
   self->table_next = NULL;
   return self;
 }
@@ -315,43 +325,177 @@ void set_sub_relation_first_and_last(Entity* entity, int pos)
     entity->last_sub_rel = pos;
 }
 
-int relation_add_entities(Relation* rel, Entity* src, Entity* dest)
+SubRelation_pointer* add_sub_rel_to_pointer(SubRelation* rel)
 {
-  int pos = hash_function(src->name, SUB_REL_TABLE_SIZE);
-  SubRelation** start = (SubRelation**) (dest->sub_relations+pos);
+  SubRelation_pointer* sub = (SubRelation_pointer*) malloc(sizeof(SubRelation_pointer));
+  sub->rel = rel;
+  sub->next = NULL;
+  return sub;
+}
+
+SubRelation* delete_invalid_relation(SubRelation* rel)
+{
+  #ifdef deb
+    printf("deleting invalid relation: %x\n", rel);
+  #endif
+  SubRelation* next = (SubRelation*) rel->table_next;
+  free(rel);
+  return next;
+}
+
+int relation_add_entities(Relation* rel, Entity* src, Entity* dest, int pos)
+{
+  //setup
+  SubRelation* sub_rel;
+  //add sub relation to relation
+  SubRelation* rel_start = (SubRelation*) rel->first_sub_relation;
+  if (rel_start == NULL)
+  {
+    sub_rel = create_sub_relation(src, rel, dest);
+    #ifdef deb
+      printf("created sub relation in first slot of relation\n");
+    #endif
+    rel->first_sub_relation = sub_rel;
+  }
+  else
+  {
+    SubRelation* pointer = rel_start;
+    SubRelation* prev_pointer = NULL;
+    SubRelation* destination = NULL;
+    SubRelation* prev_dest = NULL;
+    while(pointer != NULL)
+    {
+      #ifdef deb
+        printf("pointer: %d\n", pointer);
+      #endif
+      if (pointer->valid == 1)
+      {
+        #ifdef deb
+          printf("sub-relation is valid\n");
+        #endif
+        if (pointer->source == src && pointer->destination == dest)
+        {
+          #ifdef deb
+            printf("Relation already exists.\n");
+            #endif
+            return 1;
+          }
+          else if (destination == NULL)
+          {
+            if (strcmp(dest->name, (pointer->destination)->name) < 0)
+            {
+              #ifdef deb
+              printf("dest is smaller\n");
+              #endif
+              destination = pointer;
+              prev_dest = prev_pointer;
+              break;
+            }
+          }
+          #ifdef deb
+            printf("dest is bigger\n");
+          #endif
+          prev_pointer = pointer;
+          pointer = (SubRelation*) pointer->table_next;
+        }
+        else
+        {
+          #ifdef deb
+            printf("sub-relation is invalid\n");
+          #endif
+          pointer = delete_invalid_relation(pointer);
+          #ifdef deb
+            printf("new pointer: %x\n", pointer);
+          #endif
+          if (prev_pointer != NULL)
+            prev_pointer->table_next = pointer;
+          else
+            rel->first_sub_relation = pointer;
+        }
+      }
+      sub_rel = create_sub_relation(src, rel, dest);
+
+      if (destination == NULL)
+      {
+        prev_pointer->table_next = sub_rel;
+        #ifdef deb
+          printf("created sub relation in last slot of relation\n");
+        #endif
+      }
+      else
+      {
+        if (prev_dest == NULL)
+        {
+          sub_rel->table_next = rel_start;
+          rel->first_sub_relation = sub_rel;
+          #ifdef deb
+            printf("added sub relation in first slot of relation\n");
+          #endif
+        }
+        else
+        {
+          sub_rel->table_next = destination;
+          prev_dest->table_next = sub_rel;
+          #ifdef deb
+            printf("added sub relation in middle slot of relation\n");
+          #endif
+        }
+      }
+  }
+
+  //add relation to in relations of the source
+  SubRelation_pointer** start = (SubRelation_pointer**) (dest->sub_relations_in+pos);
+  SubRelation_pointer* sub_rel_p;
+  SubRelation_pointer* prev_rel_p;
   if (*start == NULL)
   {
-    *start = create_sub_relation(src, rel);
-    set_sub_relation_first_and_last(dest, pos);
+    *start = add_sub_rel_to_pointer(sub_rel);
     #ifdef deb
       printf("Added entries to relation, first place\n");
     #endif
   }
   else
   {
-    SubRelation* sub_rel = *start;
-    SubRelation* prev_rel;
-    while(sub_rel != NULL)
+    sub_rel_p = *start;
+    while(sub_rel_p != NULL)
     {
-      prev_rel = sub_rel;
-      if (src == (sub_rel)->source && rel == (sub_rel)->relation)
-      {
-        #ifdef deb
-          printf("Relation already exists.\n");
-        #endif
-        return 1;
-      }
-      sub_rel = (SubRelation*) sub_rel->table_next;
+      prev_rel_p = sub_rel_p;
+      sub_rel_p = (SubRelation_pointer*) sub_rel_p->next;
     }
-    sub_rel = create_sub_relation(src, rel);
-    prev_rel->table_next = sub_rel;
-    set_sub_relation_first_and_last(dest, pos);
+    sub_rel_p = add_sub_rel_to_pointer(sub_rel);
+    prev_rel_p->next = sub_rel_p;
+  }
+
+  //add relation to source entity
+  start = (SubRelation_pointer**) (src->sub_relations_out+pos);
+  if (*start == NULL)
+  {
+    *start = add_sub_rel_to_pointer(sub_rel);
     #ifdef deb
-      printf("Added entries to relation\n");
+      printf("Added entries to relation, first place\n");
     #endif
   }
+  else
+  {
+    sub_rel_p = *start;
+    while(sub_rel_p != NULL)
+    {
+      prev_rel_p = sub_rel_p;
+      sub_rel_p = (SubRelation_pointer*) sub_rel_p->next;
+    }
+    sub_rel_p = add_sub_rel_to_pointer(sub_rel);
+    prev_rel_p->next = sub_rel_p;
+  }
+
+  set_sub_relation_first_and_last(dest, pos);
+  set_sub_relation_first_and_last(src, pos);
+  #ifdef deb
+    printf("Added entries to relation\n");
+  #endif
+
   return 0;
 }
+
 //adds entities to the new/existing relation;
 //return 0 if everything went okay, else 1.
 
@@ -360,7 +504,7 @@ Entity* handle_entity_creation(String name)
   int pos = hash_function(name, ENTITY_TABLE_SIZE);
   if (entity_table[pos] == NULL)
   {
-    entity_table[pos] = create_entity(name);
+    entity_table[pos] = create_entity(name, pos);
     #ifdef deb
       printf("Created new entity in empty slot\n");
     #endif
@@ -393,7 +537,7 @@ Entity* handle_entity_creation(String name)
     #ifdef deb
       printf("Created new entity\n");
     #endif
-    entity = create_entity(name);
+    entity = create_entity(name, pos);
     prev_entity->table_next = entity;
     return entity;
   }
@@ -420,23 +564,29 @@ Relation* handle_relation_creation(String name1, String name2, String name)
 
   if (relations_table[pos] == NULL)
   {
-    relations_table[pos] = create_relation(name, pos);
     #ifdef deb
       printf("Created new relation in empty table slot\n");
     #endif
-    relation_add_entities(relations_table[pos], e1, e2);
+    relations_table[pos] = create_relation(name, pos);
+    relation_add_entities(relations_table[pos], e1, e2, pos);
     return relations_table[pos];
   }
   else
   {
     Relation* rel = relations_table[pos];
     Relation* prev_rel;
+    #ifdef deb
+      printf("first relation slot isn't empty\n");
+    #endif
     while (rel != NULL)
     {
+      #ifdef deb
+        printf("rel: %s\n", rel->name);
+      #endif
       prev_rel = rel;
       if (strcmp(name, rel->name) == 0)
       {
-        relation_add_entities(rel, e1, e2);
+        relation_add_entities(rel, e1, e2, pos);
         return rel;
       }
       rel = (Relation*) rel->table_next;
@@ -445,9 +595,9 @@ Relation* handle_relation_creation(String name1, String name2, String name)
     prev_rel->table_next = rel;
     rel->table_prev = prev_rel;
     #ifdef deb
-      printf("Created new relation\n");
+      printf("Created new relation at list end\n");
     #endif
-    relation_add_entities(rel, e1, e2);
+    relation_add_entities(rel, e1, e2, pos);
     return rel;
   }
   #ifdef deb
@@ -467,20 +617,37 @@ SubRelation* delete_sub_relation(SubRelation* sub_rel)
 //deletes the specified sub relation, return the next pointer.
 //if there is no next pointer, return NULL.
 
+SubRelation_pointer* delete_sub_relation_pointer(SubRelation_pointer* rel)
+{
+  SubRelation_pointer* next = (SubRelation_pointer*) rel->next;
+  (rel->rel)->valid = 0;
+  #ifdef deb
+    printf("deleted pointer to %s.\n", ((rel->rel)->relation)->name);
+  #endif
+  free(rel);
+  return next;
+}
+
 void delete_relation_stack(Entity* entity)
 {
-  SubRelation* next;
-  SubRelation** start;
-  for(int i=0; i<SUB_REL_TABLE_SIZE; i++)
+  SubRelation_pointer** in_start;
+  SubRelation_pointer** out_start;
+  for(int i=entity->first_sub_rel; i<SUB_REL_TABLE_SIZE; i++)
   {
-    start = (SubRelation**) (entity->sub_relations+i);
-    while (*start != NULL)
+    in_start = (SubRelation_pointer**) (entity->sub_relations_in+i);
+    out_start = (SubRelation_pointer**) (entity->sub_relations_out+i);
+    while (*in_start != NULL)
     {
-      next = (SubRelation*) (*start)->table_next;
-      free(*start);
-      *start = next;
+      *in_start = delete_sub_relation_pointer(*in_start);
       #ifdef deb
-        printf("deleted relation\n");
+        printf("deleted in relation\n");
+      #endif
+    }
+    while (*out_start != NULL)
+    {
+      *out_start = delete_sub_relation_pointer(*out_start);
+      #ifdef deb
+        printf("deleted in relation\n");
       #endif
     }
   }
@@ -520,44 +687,111 @@ int delrel_function(String name_source, String name_dest, String rel_name)
     return 0;
   }
 
-  int sub_pos = hash_function(name_source, SUB_REL_TABLE_SIZE);
-  SubRelation** start = (SubRelation**) (e_dest->sub_relations+sub_pos);
+  int pos = hash_function(rel_name, SUB_REL_TABLE_SIZE);
+  SubRelation_pointer** start = (SubRelation_pointer**) (e_dest->sub_relations_in+pos);
+  //delete relation in destination
   if (*start != NULL)
   {
-    SubRelation* sub_rel = *start;
-    SubRelation* prev_rel = NULL;
+    SubRelation_pointer* sub_rel = *start;
+    SubRelation_pointer* prev_rel = NULL;
     while(sub_rel != NULL)
     {
-      if (sub_rel->source == e1 && sub_rel->relation == rel)
+      SubRelation* relation = sub_rel->rel;
+      if (relation->source == e1 && relation->relation == rel)
       {
         if (prev_rel == NULL)
         {
-          *start = delete_sub_relation(sub_rel);
-          return sub_pos;
+          *start = delete_sub_relation_pointer(sub_rel);
+          break;
         }
         else
         {
-          prev_rel->table_next = delete_sub_relation(sub_rel);
-          return sub_pos;
+          prev_rel->next = delete_sub_relation_pointer(sub_rel);
+          break;
         }
       }
       prev_rel = sub_rel;
-      sub_rel = (SubRelation*) sub_rel->table_next;
+      sub_rel = (SubRelation_pointer*) sub_rel->next;
     }
   }
+  start = (SubRelation_pointer**) (e1->sub_relations_out+pos);
+  //delete out relation in source
+  if (*start != NULL)
+  {
+    SubRelation_pointer* sub_rel = *start;
+    SubRelation_pointer* prev_rel = NULL;
+    while(sub_rel != NULL)
+    {
+      SubRelation* relation = sub_rel->rel;
+      if (relation->destination == e_dest && relation->relation == rel)
+      {
+        if (prev_rel == NULL)
+        {
+          *start = delete_sub_relation_pointer(sub_rel);
+          break;
+        }
+        else
+        {
+          prev_rel->next = delete_sub_relation_pointer(sub_rel);
+          break;
+        }
+      }
+      prev_rel = sub_rel;
+      sub_rel = (SubRelation_pointer*) sub_rel->next;
+    }
+  }
+  //delete sub relation from relation list in relation
+  SubRelation* sub_rel = (SubRelation*) rel->first_sub_relation;
+  SubRelation* sub_rel_prev = NULL;
+  while (sub_rel != NULL)
+  {
+    if (sub_rel->valid == 1)
+    {
+      if (sub_rel->source == e1 && sub_rel->destination == e_dest)
+      {
+        if (sub_rel_prev != NULL)
+        {
+          sub_rel = delete_sub_relation(sub_rel);
+          sub_rel_prev->table_next = sub_rel;
+          #ifdef deb
+            printf("deleted relation in middle of list.\n");
+          #endif
+        }
+        else
+        {
+          sub_rel = delete_sub_relation(sub_rel);
+          rel->first_sub_relation = sub_rel;
+          #ifdef deb
+            printf("deleted relation at the start of the list.\n");
+          #endif
+        }
+        return pos;
+      }
+      sub_rel_prev = sub_rel;
+      sub_rel = (SubRelation*) sub_rel->table_next;
+    }
+    else
+    {
+      sub_rel = delete_invalid_relation(sub_rel);
+      #ifdef deb
+        printf("deleted an invalid relation.\n");
+      #endif
+    }
+  }
+
   #ifdef deb
     printf("no relation found.\n");
   #endif
-  return sub_pos;
+  return pos;
 }
 //return the postion of the relation in the sub array for the specific relation
 
-SubRelation* delete_obsolete_relation(int i, SubRelation* prev_rel, Entity* entity, SubRelation* sub_rel)
+SubRelation* delete_obsolete_relation_old(int i, SubRelation* prev_rel, Entity* entity, SubRelation* sub_rel)
 {
   if (prev_rel == NULL)
   {
-    *(entity->sub_relations+i) = delete_sub_relation(sub_rel);
-    sub_rel = (SubRelation*) *(entity->sub_relations+i);
+    *(entity->sub_relations_in+i) = delete_sub_relation(sub_rel);
+    sub_rel = (SubRelation*) *(entity->sub_relations_in+i);
   }
   else
   {
@@ -566,8 +800,7 @@ SubRelation* delete_obsolete_relation(int i, SubRelation* prev_rel, Entity* enti
   }
   return sub_rel;
 }
-//deletes an obsolete sub relation, returns the next relation (if there is no
-//next it returns NULL).
+//DELETE
 
 OrdRel* delete_unused_relation(Relation* rel)
 {
@@ -608,7 +841,8 @@ PopEntity* create_pop_entity(Entity* entity)
   return pop;
 }
 
-int report_function()
+#ifdef aaa
+int report_function_old()
 {
   //if there are no relations, do nothing
   if (rel_list_head == NULL)
@@ -626,6 +860,9 @@ int report_function()
   int i, j, position;
   int max_value_temp[number_of_relations];
   PopEntity* popular_entities_temp[number_of_relations];
+  int max_value[number_of_relations];
+  PopEntity* popular_entities[number_of_relations];
+  Relation* relations[number_of_relations];
 
   for (i=0; i<number_of_relations; i++)
     popular_entities_temp[i] = NULL;
@@ -636,7 +873,8 @@ int report_function()
     #ifdef deb
       printf("starting phase one.\n");
     #endif
-  for (j=0; j<ENTITY_TABLE_SIZE; j++)
+  int cycle_end = last_entity_position + 1;
+  for (j=first_entity_position; j<cycle_end; j++)
   {
     //load the entities popularity for each relation in the temp array
     if (entity_table[j] != NULL)
@@ -655,12 +893,12 @@ int report_function()
           int last_relation = entity->last_sub_rel + 1;
           for (int i=entity->first_sub_rel; i<last_relation; i++)
           {
-            sub_rel = (SubRelation*) *(entity->sub_relations+i);
+            sub_rel = (SubRelation*) *(entity->sub_relations_in+i);
             prev_rel = NULL;
             while (sub_rel != NULL)
             {
               #ifdef deb
-                printf("found a relation\n");
+                printf("found a relation\n"()());
               #endif
               src = sub_rel->source;
               relation = sub_rel->relation;
@@ -771,10 +1009,10 @@ int report_function()
                   sub_rel = (SubRelation*) sub_rel->table_next;
                 }
                 else
-                  sub_rel = delete_obsolete_relation(i, prev_rel, entity, sub_rel);
+                  sub_rel = delete_obsolete_relation_old(i, prev_rel, entity, sub_rel);
               }
               else
-                sub_rel = delete_obsolete_relation(i, prev_rel, entity, sub_rel);
+                sub_rel = delete_obsolete_relation_old(i, prev_rel, entity, sub_rel);
             }
           }
         }
@@ -801,9 +1039,6 @@ int report_function()
   #endif
   OrdRel* ord_rel = rel_list_head;
 
-  int max_value[number_of_relations];
-  PopEntity* popular_entities[number_of_relations];
-  String relation_name[number_of_relations];
   j = i = 0;
 
   while(ord_rel != NULL)
@@ -822,11 +1057,12 @@ int report_function()
     else
     {
       max_value[j] = max_value_temp[i];
+      int max_val = max_value[j];
       PopEntity* pop_ent = popular_entities_temp[i];
       PopEntity* prev_ent = NULL;
       while (pop_ent != NULL)
       {
-        if (pop_ent->occurrences < max_value[j])
+        if (pop_ent->occurrences < max_val)
         {
           PopEntity* temp;
           if (prev_ent == NULL)
@@ -850,13 +1086,13 @@ int report_function()
         }
       }
       popular_entities[j] = popular_entities_temp[i];
-      strcpy(relation_name[j], (ord_rel->relation)->name);
+      relations[j] = ord_rel->relation;
       ord_rel = (OrdRel*) ord_rel->next;
       j ++;
     }
     i ++;
   }
-    #ifdef deb
+  #ifdef deb
     for (i=0; i<number_of_relations; i++)
     {
       printf("%d: ", i);
@@ -878,7 +1114,7 @@ int report_function()
   for(i=0; i<number_of_relations; i++)
   {
     //print required stuff
-    printf("%s ", relation_name[i]);
+    printf("%s ", relations[i]->name);
     pop_entity = popular_entities[i];
     PopEntity* pe;
     while (pop_entity != NULL)
@@ -891,6 +1127,21 @@ int report_function()
     printf("%d; ", max_value[i]);
   }
   printf("\n");
+  return 0;
+}
+#endif
+
+int report_function()
+{
+  //if there are no relations, do nothing
+  if (rel_list_head == NULL)
+  {
+    printf("none\n");
+    return 0;
+  }
+
+  OrdRel* pointer = rel_list_head;
+
   return 0;
 }
 
@@ -910,7 +1161,9 @@ void deb_print_entities()
         while (entity != NULL)
         {
           if (entity->valid == 1)
+          {
             printf("%s [id = %d], ", entity->name, entity->entity_id);
+          }
           entity = (Entity*) entity->table_next;
         }
         printf("\n");
@@ -918,50 +1171,38 @@ void deb_print_entities()
   }
 }
 
-void deb_print_sub_relations(Entity* entity)
+void deb_print_sub_relations(Relation* rel)
 {
-  Entity* src;
-  Relation* relation;
-  SubRelation* prev_rel;
-  for (int i=0; i<SUB_REL_TABLE_SIZE; i++)
+  SubRelation* sub_rel = (SubRelation*) rel->first_sub_relation;
+  SubRelation* prev_sub_rel = NULL;
+  while (sub_rel != NULL)
   {
-    SubRelation* sub_rel = (SubRelation*) *(entity->sub_relations+i);
-    prev_rel = NULL;
-    while (sub_rel != NULL)
+    if (sub_rel->valid == 1)
     {
-      src = sub_rel->source;
-      relation = sub_rel->relation;
-      if (src->valid == 1)
-      {
-        if (sub_rel->source_id == src->entity_id)
-        {
-          printf("%s --%s-> %s\n", src->name, relation->name, entity->name);
-          prev_rel = sub_rel;
-          sub_rel = (SubRelation*) sub_rel->table_next;
-        }
-        else
-          sub_rel = delete_obsolete_relation(i, prev_rel, entity, sub_rel);
-      }
+      Entity* src = sub_rel->source;
+      Entity* dest = sub_rel->destination;
+      printf("%s --%s--> %s\n", src->name, rel->name, dest->name);
+      prev_sub_rel = sub_rel;
+      sub_rel = (SubRelation*) sub_rel->table_next;
+    }
+    else
+    {
+      sub_rel = delete_invalid_relation(sub_rel);
+      if (prev_sub_rel == NULL)
+        rel->first_sub_relation = sub_rel;
       else
-        sub_rel = delete_obsolete_relation(i, prev_rel, entity, sub_rel);
+        prev_sub_rel->table_next = sub_rel;
     }
   }
 }
 
 void deb_print_relations()
 {
-  Entity* dest;
-  for (int i=0; i<ENTITY_TABLE_SIZE; i++)
+  OrdRel* rel = rel_list_head;
+  while (rel != NULL)
   {
-    if (entity_table[i] != NULL)
-    {
-      dest = entity_table[i];
-      while (dest != NULL)
-      {
-        deb_print_sub_relations(dest);
-        dest = (Entity*) dest->table_next;
-      }
-    }
+    deb_print_sub_relations(rel->relation);
+    rel = (OrdRel*) rel->next;
   }
 }
 
@@ -1032,6 +1273,7 @@ int main() //main program
         handle_entity_creation(argument0);
         #ifdef deb
           deb_print_entities();
+          deb_print_relations();
         #endif
         break;
       }
@@ -1052,6 +1294,7 @@ int main() //main program
         delent_function(argument0);
         #ifdef deb
           deb_print_entities();
+          deb_print_relations();
         #endif
         break;
       }
