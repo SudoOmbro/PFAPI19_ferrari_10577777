@@ -736,7 +736,7 @@ int report_function()
         maximums[i] = temp_counter;
       entities_array[i][j].entity = prev_entity;
       entities_array[i][j].occurrences = temp_counter;
-      entities_array[i][j].occurrences = 0;
+      entities_array[i][j+1].occurrences = 0;
       #ifdef deb
         printf("changing relation\n");
       #endif
