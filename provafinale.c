@@ -46,6 +46,7 @@ typedef struct {
   Entity* source;
   Entity* destination;
   int source_id;
+  int destination_id;
   void* table_next; //SubRelation*
 } SubRelation;  //the destination is the entity that contains it.
 
@@ -147,6 +148,17 @@ void* global_hash_table_linear_search(String name, int table_pos, const int tabl
 //returns 0 if nothing is found, else it returns the pointer
 //of the wanted thing
 
+int check_relation_validity(SubRelation* sub_rel)
+{
+  Entity* src = sub_rel->source;
+  Entity* dest = sub_rel->destination;
+  if (src->valid == 1 && dest->valid == 1)
+    if (src->entity_id == sub_rel->source_id && dest->entity_id == sub_rel->destination_id)
+      return 1;
+  return 0;
+}
+//check the validity of a relation (1 = valid, 0 = not valid).
+
 Entity* get_entity(String name)
 {
   int pos = hash_function(name, ENTITY_TABLE_SIZE);
@@ -228,18 +240,6 @@ void deallocate_entity(Entity* self)
   number_of_entities --;
 }
 
-void ordered_relation_list_fixup(OrdRel* start_rel, int pos)
-{
-  OrdRel* rel = start_rel;
-  while (rel != NULL)
-  {
-    rel->position = pos;
-    pos ++;
-    rel = (OrdRel*) rel->next;
-  }
-}
-//fixes the order of the ordered list from the indicated starting position
-
 Relation* create_relation(String name, int hash)
 {
   //create the relation to put in hash table
@@ -307,22 +307,18 @@ SubRelation* create_sub_relation(Entity* src, Relation* rel, Entity* dest)
   self->relation = rel;
   self->destination = dest;
   self->source_id = src->entity_id;
+  self->destination_id = dest->entity_id;
   self->table_next = NULL;
   return self;
-}
-
-void set_sub_relation_first_and_last(Entity* entity, int pos)
-{
-  if (entity->first_sub_rel > pos)
-    entity->first_sub_rel = pos;
-  if (entity->last_sub_rel < pos)
-    entity->last_sub_rel = pos;
 }
 
 SubRelation* delete_invalid_relation(SubRelation* rel)
 {
   #ifdef deb
-    printf("deleting invalid relation: %x\n", rel);
+    char* name = (rel->relation)->name;
+    char* src = (rel->source)->name;
+    char* dest = (rel->destination)->name;
+    printf("deleting invalid relation: %s --%s--> %s\n", src, name, dest);
   #endif
   SubRelation* next = (SubRelation*) rel->table_next;
   free(rel);
@@ -353,7 +349,7 @@ int relation_add_entities(Relation* rel, Entity* src, Entity* dest, int pos)
       #ifdef deb
         printf("pointer: %d\n", pointer);
       #endif
-      if ((pointer->destination)->valid == 1 && (pointer->source)->valid == 1)
+      if (check_relation_validity(pointer) == 1)
       {
         #ifdef deb
           printf("sub-relation is valid\n");
@@ -425,7 +421,6 @@ int relation_add_entities(Relation* rel, Entity* src, Entity* dest, int pos)
 }
 //adds entities to the new/existing relation;
 //return 0 if everything went okay, else 1.
-
 
 Entity* handle_entity_creation(String name)
 {
@@ -610,13 +605,17 @@ int delrel_function(String name_source, String name_dest, String rel_name)
     else
     {
       sub_rel = delete_invalid_relation(sub_rel);
+      if (sub_rel_prev == NULL)
+        rel->first_sub_relation = sub_rel;
+      else
+        sub_rel_prev->table_next = sub_rel;
       #ifdef deb
         printf("deleted an invalid relation.\n");
       #endif
     }
   }
   #ifdef deb
-    printf("error;\n");
+    printf("relation does not exist (LATE)\n");
   #endif
   return 0;
 }
@@ -648,7 +647,7 @@ OrdRel* delete_unused_relation(Relation* rel)
 //if it detects that a relation has 0 instances, it deletes it;
 //called from report_function.
 
-int report_function()
+int report_function(int update)
 {
   //declarations
   int ent_num = number_of_entities + 1;
@@ -660,7 +659,7 @@ int report_function()
   Entity* temp_entity;
   Relation* relation;
   SubRelation* sub_rel;
-  SubRelation* prev_sub_rel = NULL;
+  SubRelation* prev_sub_rel;
   int i = 0, j, temp_counter = 0;
   int maximum;
 
@@ -676,17 +675,18 @@ int report_function()
   {
     relation = pointer->relation;
     sub_rel = (SubRelation*) relation->first_sub_relation;
+    prev_sub_rel = NULL;
     if (sub_rel != NULL)
     {
       #ifdef deb
         printf("relation %s is valid, accessing sub-relations\n", relation->name);
       #endif
-      relations_array[i] = pointer->relation;
+      relations_array[i] = relation;
       maximums[i] = j = temp_counter = 0;
-      prev_entity = sub_rel->destination;
+      prev_entity = NULL;
       while (sub_rel != NULL)
       {
-        if ((sub_rel->destination)->valid == 1 && (sub_rel->destination)->valid == 1)
+        if (check_relation_validity(sub_rel) == 1)
         {
           temp_entity = sub_rel->destination;
           #ifdef deb
@@ -701,19 +701,30 @@ int report_function()
           }
           else
           {
-            if (temp_counter > maximums[i])
+            if (prev_entity != NULL)
+            {
+              if (temp_counter > maximums[i])
               maximums[i] = temp_counter;
-            entities_array[i][j].entity = prev_entity;
-            entities_array[i][j].occurrences = temp_counter;
-            #ifdef deb
-              printf("%d: %s, %d;\n", j, prev_entity->name, temp_counter);
-            #endif
-            j ++;
-            prev_entity = temp_entity;
-            temp_counter = 1;
-            #ifdef deb
-              printf("found a new entity\n");
-            #endif
+              entities_array[i][j].entity = prev_entity;
+              entities_array[i][j].occurrences = temp_counter;
+              #ifdef deb
+                printf("%d: %s, %d;\n", j, prev_entity->name, temp_counter);
+              #endif
+              j ++;
+              prev_entity = temp_entity;
+              temp_counter = 1;
+              #ifdef deb
+                printf("found a new entity, %s\n", temp_entity->name);
+              #endif
+            }
+            else
+            {
+              prev_entity = temp_entity;
+              temp_counter = 1;
+              #ifdef deb
+                printf("found first entity\n");
+              #endif
+            }
           }
 
           prev_sub_rel = sub_rel;
@@ -721,14 +732,23 @@ int report_function()
         }
         else
         {
-          #ifdef deb
-            printf("deleting invalid sub relation\n");
-          #endif
           sub_rel = delete_invalid_relation(sub_rel);
           if (prev_sub_rel == NULL)
+          {
+            #ifdef deb
+              printf("prev_sub_rel is NULL\n");
+            #endif
             relation->first_sub_relation = sub_rel;
+          }
           else
             prev_sub_rel->table_next = sub_rel;
+
+          #ifdef deb
+            if (sub_rel == NULL)
+              printf("next pointer is NULL\n");
+            else
+              printf("next pointer is not NULL\n");
+          #endif
         }
       }
 
@@ -763,14 +783,17 @@ int report_function()
   {
     printf("%s ", relations_array[i]->name);
     maximum = maximums[i];
-    for (j=0; j<ent_num; j++)
+    if (maximum > 0)
     {
-      if (entities_array[i][j].occurrences == 0)
-        break;
-      if (entities_array[i][j].occurrences == maximum)
+      for (j=0; j<number_of_entities; j++)
+      {
+        if (entities_array[i][j].occurrences == 0)
+          break;
+        if (entities_array[i][j].occurrences == maximum)
         printf("%s ", (entities_array[i][j].entity)->name);
+      }
+      printf("%d; ", maximum);
     }
-    printf("%d; ", maximum);
   }
   printf("\n");
 
@@ -809,22 +832,14 @@ void deb_print_sub_relations(Relation* rel)
   SubRelation* prev_sub_rel = NULL;
   while (sub_rel != NULL)
   {
-    if ((sub_rel->source)->valid == 1 && (sub_rel->destination)->valid == 1)
+    //if ((sub_rel->source)->valid == 1 && (sub_rel->destination)->valid == 1)
     {
       Entity* src = sub_rel->source;
       Entity* dest = sub_rel->destination;
       printf("%s --%s--> %s\n", src->name, rel->name, dest->name);
-      prev_sub_rel = sub_rel;
-      sub_rel = (SubRelation*) sub_rel->table_next;
     }
-    else
-    {
-      sub_rel = delete_invalid_relation(sub_rel);
-      if (prev_sub_rel == NULL)
-        rel->first_sub_relation = sub_rel;
-      else
-        prev_sub_rel->table_next = sub_rel;
-    }
+    prev_sub_rel = sub_rel;
+    sub_rel = (SubRelation*) sub_rel->table_next;
   }
 }
 
@@ -890,12 +905,32 @@ int main() //main program
   String argument1;
   String argument2;
   LongString input_string;
+  LongString last_input_sting = "";
+  int report_needed = 1; // 0 = report has not changed, 1 = report has changed.
+  #ifdef deb
+    int command_counter = 0;
+  #endif
 
   int opcode;
   while (1)
   {
     fgets(input_string, 160, stdin);
     opcode = generate_opcode(input_string);
+    #ifdef deb
+      printf("\nCOMMAND %d: %s\n", command_counter, input_string);
+      command_counter ++;
+    #endif
+    if (opcode != 4)
+    {
+      if (strcmp(input_string, last_input_sting) == 0)
+      {
+        opcode = 6;
+        #ifdef deb
+          printf("same command\n");
+        #endif
+      }
+      strcpy(last_input_sting, input_string);
+    }
 
     switch (opcode)
     {
@@ -914,7 +949,8 @@ int main() //main program
         opcode = get_argument(input_string, argument0, 7);
         opcode = get_argument(input_string, argument1, opcode);
         get_argument(input_string, argument2, opcode);
-        handle_relation_creation(argument0, argument1, argument2);
+        if (handle_relation_creation(argument0, argument1, argument2) != 0)
+          report_needed = 1;
         #ifdef deb
           deb_print_relations();
         #endif
@@ -923,7 +959,8 @@ int main() //main program
       case 2: //delent
       {
         get_argument(input_string, argument0, 7);
-        delent_function(argument0);
+        if (delent_function(argument0) != 0)
+          report_needed = 1;
         #ifdef deb
           deb_print_entities();
           deb_print_relations();
@@ -935,7 +972,8 @@ int main() //main program
         opcode = get_argument(input_string, argument0, 7);
         opcode = get_argument(input_string, argument1, opcode);
         get_argument(input_string, argument2, opcode);
-        delrel_function(argument0, argument1, argument2);
+        if (delrel_function(argument0, argument1, argument2) != 0)
+          report_needed = 1;
         #ifdef deb
           deb_print_relations();
         #endif
@@ -943,12 +981,20 @@ int main() //main program
       }
       case 4: //report
       {
-        report_function();
+        report_function(report_needed);
+        #ifdef deb
+          deb_print_relations();
+        #endif
+        report_needed = 0;
         break;
       }
       case 5: //end
       {
         return 0;
+        break;
+      }
+      case 6:
+      {
         break;
       }
     }
