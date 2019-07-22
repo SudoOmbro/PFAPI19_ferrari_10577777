@@ -4,6 +4,7 @@
 
 #define ENTITY_TABLE_SIZE 211573
 #define RELATIONS_TABLE_SIZE 733
+#define SUB_RELATIONS_ARRAY_SIZE 6173
 
 /* add -Ddeb to gcc compiler options to compile in verbose debug mode */
 
@@ -20,6 +21,7 @@ typedef struct {
   void* ordered_relation; //points to the ordered relation.
   void* table_next; //Relation*
   void* table_prev; //Relation*
+  void* ord_ent_array[SUB_RELATIONS_ARRAY_SIZE];
 } Relation;
 
 typedef struct {
@@ -98,50 +100,42 @@ int get_argument(LongString input_string, char* dest_string, int start_pos)
 //dest_string (argomento) con la stringa trovata a partire da start_pos
 //fino ad uno spazio.
 
-void* global_hash_table_linear_search(String name, int table_pos, const int table)
+Entity* entity_hash_table_linear_search(String name, int table_pos)
 {
-  switch(table)
+  Entity* rel = entity_table[table_pos];
+  while (rel != NULL)
   {
-    case 0: //entity table
+    if (strcmp(name, rel->name) == 0)
     {
-      Entity* entity = entity_table[table_pos];
-      while (entity != NULL)
-      {
-        if (strcmp(name, entity->name) == 0)
-        {
-          #ifdef deb
-            printf("linear search done, found entity\n");
-          #endif
-          return entity;
-        }
-        entity = (Entity*) entity->table_next;
-      }
-      break;
+      #ifdef deb
+        printf("linear search done, found relation\n");
+      #endif
+      return rel;
     }
-    case 1: //relations table
-    {
-      Relation* rel = relations_table[table_pos];
-      while (rel != NULL)
-      {
-        if (strcmp(name, rel->name) == 0)
-        {
-          #ifdef deb
-            printf("linear search done, found relation\n");
-          #endif
-          return rel;
-        }
-        rel = (Relation*) rel->table_next;
-      }
-      break;
-    }
+    rel = (Entity*) rel->table_next;
   }
   #ifdef deb
     printf("linear search done, no result\n");
   #endif
   return 0;
 }
-//returns 0 if nothing is found, else it returns the pointer
-//of the wanted thing
+
+Relation* relation_hash_table_linear_search(String name, int table_pos)
+{
+  Relation* rel = relations_table[table_pos];
+  while (rel != NULL)
+  {
+    if (strcmp(name, rel->name) == 0)
+    {
+      #ifdef deb
+        printf("linear search done, found relation\n");
+      #endif
+      return rel;
+    }
+    rel = (Relation*) rel->table_next;
+  }
+  return 0;
+}
 
 int check_relation_validity(SubRelation* sub_rel)
 {
@@ -157,32 +151,8 @@ int check_relation_validity(SubRelation* sub_rel)
 Entity* get_entity(String name)
 {
   int pos = hash_function(name, ENTITY_TABLE_SIZE);
-  Entity* entity = (Entity*) global_hash_table_linear_search(name, pos, 0);
+  Entity* entity = entity_hash_table_linear_search(name, pos);
   return entity;
-}
-//check the hash table and see if the entity already exists,
-//return 0 if it does not, else return entity.
-
-Entity* get_entity_prev(String name, int pos)
-{
-  Entity* entity = (Entity*) entity_table[pos];
-  Entity* prev_entity = entity;
-  while(entity != NULL)
-  {
-    entity = (Entity*) entity->table_next;
-    if (strcmp(name, entity->name) == 0)
-    {
-      #ifdef deb
-        printf("found entity to delete in linear search.\n");
-      #endif
-      return prev_entity;
-    }
-    prev_entity = entity;
-  }
-  #ifdef deb
-    printf("no entry found to delete.\n");
-  #endif
-  return 0;
 }
 //check the hash table and see if the entity already exists,
 //return 0 if it does not, else return entity.
@@ -190,7 +160,7 @@ Entity* get_entity_prev(String name, int pos)
 Relation* get_relation(String name)
 {
   int pos = hash_function(name, RELATIONS_TABLE_SIZE);
-  Relation* entity = (Relation*) global_hash_table_linear_search(name, pos, 1);
+  Relation* entity = relation_hash_table_linear_search(name, pos);
   return entity;
 }
 //check the hash table and see if the entity already exists,
@@ -350,7 +320,7 @@ int relation_add_entities(Relation* rel, Entity* src, Entity* dest, int pos)
           #ifdef deb
             printf("Relation already exists.\n");
             #endif
-            return 1;
+            return 0;
           }
           else
           {
@@ -367,7 +337,7 @@ int relation_add_entities(Relation* rel, Entity* src, Entity* dest, int pos)
                 #ifdef deb
                   printf("added sub relation in first slot of relation\n");
                 #endif
-                return 0;
+                return 1;
               }
               else
               {
@@ -377,7 +347,7 @@ int relation_add_entities(Relation* rel, Entity* src, Entity* dest, int pos)
                 #ifdef deb
                   printf("added sub relation in middle slot of relation\n");
                 #endif
-                return 0;
+                return 1;
               }
             }
           }
@@ -408,7 +378,7 @@ int relation_add_entities(Relation* rel, Entity* src, Entity* dest, int pos)
         printf("created sub relation in last slot of relation\n");
       #endif
   }
-  return 0;
+  return 1;
 }
 //adds entities to the new/existing relation;
 //return 0 if everything went okay, else 1.
@@ -500,8 +470,7 @@ int handle_relation_creation(String name1, String name2, String name)
       prev_rel = rel;
       if (strcmp(name, rel->name) == 0)
       {
-        relation_add_entities(rel, e1, e2, pos);
-        return 1;
+        return relation_add_entities(rel, e1, e2, pos);
       }
       rel = (Relation*) rel->table_next;
     }
@@ -511,8 +480,7 @@ int handle_relation_creation(String name1, String name2, String name)
     #ifdef deb
       printf("Created new relation at list end\n");
     #endif
-    relation_add_entities(rel, e1, e2, pos);
-    return 1;
+    return relation_add_entities(rel, e1, e2, pos);
   }
   #ifdef deb
     printf("Error\n");
@@ -682,7 +650,6 @@ int report_function(int update)
       #ifdef deb
         printf("relation %s is valid, accessing sub-relations\n", relation->name);
       #endif
-      relations_array[i] = relation;
       maximums[i] = j = temp_counter = 0;
       prev_entity = NULL;
       while (sub_rel != NULL)
@@ -705,11 +672,11 @@ int report_function(int update)
             if (prev_entity != NULL)
             {
               if (temp_counter > maximums[i])
-              maximums[i] = temp_counter;
+                maximums[i] = temp_counter;
               entities_array[i][j].entity = prev_entity;
               entities_array[i][j].occurrences = temp_counter;
               #ifdef deb
-                printf("%d: %s, %d;\n", j, prev_entity->name, temp_counter);
+                printf("%d|%d: %s, %d;\n", i, j, prev_entity->name, temp_counter);
               #endif
               j ++;
               prev_entity = temp_entity;
@@ -758,11 +725,19 @@ int report_function(int update)
       entities_array[i][j].entity = prev_entity;
       entities_array[i][j].occurrences = temp_counter;
       entities_array[i][j+1].occurrences = 0;
+
+      if (maximums[i] > 0)
+      {
+        relations_array[i] = relation;
+        i ++;
+        #ifdef deb
+          printf("maximum is > 0, added relation to report array.\n");
+        #endif
+      }
       #ifdef deb
         printf("changing relation\n");
       #endif
       pointer = (OrdRel*) pointer->next;
-      i ++;
     }
     else
     {
@@ -779,31 +754,16 @@ int report_function(int update)
     printf("finished phase one, printing...\n");
   #endif
 
-  #ifdef aaa
-  //print stuff
-  for (i=0; relations_array[i] != NULL; i++)
+  if (relations_array[0] == NULL)
   {
-    maximum = maximums[i];
-    if (maximum > 0)
-    {
-      printf("%s ", relations_array[i]->name);
-      for (j=0; j<number_of_entities; j++)
-      {
-        if (entities_array[i][j].occurrences == 0)
-          break;
-        if (entities_array[i][j].occurrences == maximum)
-        printf("%s ", (entities_array[i][j].entity)->name);
-      }
-      printf("%d; ", maximum);
-    }
+    printf("none\n");
+    return 0;
   }
-  printf("\n");
-  #endif
 
   for (i=0; relations_array[i] != NULL; i++)
   {
     maximum = maximums[i];
-    if (maximum > 0)
+    //if (maximum > 0)
     {
       strcat(report_string, relations_array[i]->name);
       strcat(report_string, " ");
@@ -933,7 +893,6 @@ int main() //main program
   String argument1;
   String argument2;
   LongString input_string;
-  LongString last_input_sting = "";
   int report_needed = 1; // 0 = report has not changed, 1 = report has changed.
   #ifdef deb
     int command_counter = 0;
@@ -944,6 +903,7 @@ int main() //main program
   {
     fgets(input_string, 160, stdin);
     opcode = generate_opcode(input_string);
+
     #ifdef deb
       printf("\nCOMMAND %d: %s\n", command_counter, input_string);
       command_counter ++;
