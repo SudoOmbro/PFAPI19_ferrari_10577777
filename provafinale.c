@@ -2,14 +2,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define SUB_REL_TABLE_SIZE 499
-#define ENTITY_TABLE_SIZE 91711
-#define RELATIONS_TABLE_SIZE 353
+#define ENTITY_TABLE_SIZE 211573
+#define RELATIONS_TABLE_SIZE 733
 
 /* add -Ddeb to gcc compiler options to compile in verbose debug mode */
 
 //type definitions--------------------------------------------------------------
 
+typedef char SuperLongString[1000];
 typedef char LongString[160];
 typedef char String[50];
 
@@ -31,11 +31,6 @@ typedef struct {
 
 typedef struct {
   String name;
-
-  int sub_relations_number;
-  int first_sub_rel;
-  int last_sub_rel;
-
   int entity_id; //add 1 when entity changes.
   int valid;     // = 1 when valid, else = 0.
   void* table_next; //Entity*
@@ -78,7 +73,7 @@ int hash_function(char* text, const int table_size)
   }
   value =  value % table_size;
   #ifdef deb
-  printf("hash value: %d\n", value);
+    printf("hash value: %d\n", value);
   #endif
   return value;
 }
@@ -210,8 +205,6 @@ Entity* create_entity(String name, int table_pos)
   self->table_next = NULL;
   self->entity_id = 0;
   self->valid = 1;
-  self->first_sub_rel = SUB_REL_TABLE_SIZE;
-  self->last_sub_rel = 0;
 
   if (table_pos > last_entity_position)
     last_entity_position = table_pos;
@@ -234,8 +227,6 @@ void deallocate_entity(Entity* self)
 {
   self->entity_id ++;
   self->valid = 0;
-  self->first_sub_rel = SUB_REL_TABLE_SIZE;
-  self->last_sub_rel = 0;
   strcpy(self->name, "");
   number_of_entities --;
 }
@@ -349,7 +340,7 @@ int relation_add_entities(Relation* rel, Entity* src, Entity* dest, int pos)
       #ifdef deb
         printf("pointer: %d\n", pointer);
       #endif
-      if (check_relation_validity(pointer) == 1)
+      //if (check_relation_validity(pointer) == 1)
       {
         #ifdef deb
           printf("sub-relation is valid\n");
@@ -396,20 +387,20 @@ int relation_add_entities(Relation* rel, Entity* src, Entity* dest, int pos)
           prev_pointer = pointer;
           pointer = (SubRelation*) pointer->table_next;
         }
-        else
-        {
-          #ifdef deb
-            printf("sub-relation is invalid\n");
-          #endif
-          pointer = delete_invalid_relation(pointer);
-          #ifdef deb
-            printf("new pointer: %x\n", pointer);
-          #endif
-          if (prev_pointer != NULL)
-            prev_pointer->table_next = pointer;
-          else
-            rel->first_sub_relation = pointer;
-        }
+        //else
+        //{
+          //#ifdef deb
+            //printf("sub-relation is invalid\n");
+          //#endif
+          //pointer = delete_invalid_relation(pointer);
+          //#ifdef deb
+            //printf("new pointer: %x\n", pointer);
+          //#endif
+          //if (prev_pointer != NULL)
+            //prev_pointer->table_next = pointer;
+          //else
+            //rel->first_sub_relation = pointer;
+        //}
       }
       sub_rel = create_sub_relation(src, rel, dest);
       prev_pointer->table_next = sub_rel;
@@ -422,7 +413,7 @@ int relation_add_entities(Relation* rel, Entity* src, Entity* dest, int pos)
 //adds entities to the new/existing relation;
 //return 0 if everything went okay, else 1.
 
-Entity* handle_entity_creation(String name)
+int handle_entity_creation(String name)
 {
   int pos = hash_function(name, ENTITY_TABLE_SIZE);
   if (entity_table[pos] == NULL)
@@ -431,7 +422,7 @@ Entity* handle_entity_creation(String name)
     #ifdef deb
       printf("Created new entity in empty slot\n");
     #endif
-    return entity_table[pos];
+    return 1;
   }
   else
   {
@@ -446,7 +437,7 @@ Entity* handle_entity_creation(String name)
         #ifdef deb
           printf("Reallocated entity\n");
         #endif
-        return entity;
+        return 1;
       }
       if (strcmp(name, entity->name) == 0)
       {
@@ -462,7 +453,7 @@ Entity* handle_entity_creation(String name)
     #endif
     entity = create_entity(name, pos);
     prev_entity->table_next = entity;
-    return entity;
+    return 1;
   }
   #ifdef deb
     printf("Error\n");
@@ -471,7 +462,7 @@ Entity* handle_entity_creation(String name)
 }
 //handle entity creation, return the created entity if success, else 0
 
-Relation* handle_relation_creation(String name1, String name2, String name)
+int handle_relation_creation(String name1, String name2, String name)
 {
   int pos = hash_function(name, RELATIONS_TABLE_SIZE);
   Entity* e1 = get_entity(name1);
@@ -492,7 +483,7 @@ Relation* handle_relation_creation(String name1, String name2, String name)
     #endif
     relations_table[pos] = create_relation(name, pos);
     relation_add_entities(relations_table[pos], e1, e2, pos);
-    return relations_table[pos];
+    return 1;
   }
   else
   {
@@ -510,7 +501,7 @@ Relation* handle_relation_creation(String name1, String name2, String name)
       if (strcmp(name, rel->name) == 0)
       {
         relation_add_entities(rel, e1, e2, pos);
-        return rel;
+        return 1;
       }
       rel = (Relation*) rel->table_next;
     }
@@ -521,7 +512,7 @@ Relation* handle_relation_creation(String name1, String name2, String name)
       printf("Created new relation at list end\n");
     #endif
     relation_add_entities(rel, e1, e2, pos);
-    return rel;
+    return 1;
   }
   #ifdef deb
     printf("Error\n");
@@ -548,13 +539,13 @@ int delent_function(String name)
     #ifdef deb
       printf("invalid entity.\n");
     #endif
-    return 1;
+    return 0;
   }
   deallocate_entity(entity);
   #ifdef deb
     printf("deallocated entity at %x\n", entity);
   #endif
-  return 0;
+  return 1;
 }
 //deallocates an entity; return 0 if succes, else 1
 
@@ -597,7 +588,7 @@ int delrel_function(String name_source, String name_dest, String rel_name)
             printf("deleted relation at the start of the list.\n");
           #endif
         }
-        return 0;
+        return 1;
       }
       sub_rel_prev = sub_rel;
       sub_rel = (SubRelation*) sub_rel->table_next;
@@ -649,20 +640,6 @@ OrdRel* delete_unused_relation(Relation* rel)
 
 int report_function(int update)
 {
-  //declarations
-  int ent_num = number_of_entities + 1;
-  Pop entities_array[number_of_relations][ent_num];
-  Relation* relations_array[number_of_relations+1];
-  int maximums[number_of_relations];
-  OrdRel* pointer = rel_list_head;
-  Entity* prev_entity;
-  Entity* temp_entity;
-  Relation* relation;
-  SubRelation* sub_rel;
-  SubRelation* prev_sub_rel;
-  int i = 0, j, temp_counter = 0;
-  int maximum;
-
   //if there are no relations, do nothing
   if (rel_list_head == NULL)
   {
@@ -670,7 +647,31 @@ int report_function(int update)
     return 0;
   }
 
-  //get maximums an load entities in 2d array
+  static SuperLongString report_string;
+
+  if (update == 1) //if the report needs to be updated:
+  {
+    //report string
+    strcpy(report_string, "");
+
+    //declarations of data structures used
+    int ent_num = number_of_entities + 1;
+    Pop entities_array[number_of_relations][ent_num];
+    Relation* relations_array[number_of_relations+1];
+    int maximums[number_of_relations];
+
+    //aux variables
+    OrdRel* pointer = rel_list_head;
+    Entity* prev_entity;
+    Entity* temp_entity;
+    Relation* relation;
+    SubRelation* sub_rel;
+    SubRelation* prev_sub_rel;
+    char tmp_string[20];
+    int i = 0, j, temp_counter = 0;
+    int maximum;
+
+  //get maximums and load entities in 2d array
   while (pointer != NULL)
   {
     relation = pointer->relation;
@@ -778,13 +779,14 @@ int report_function(int update)
     printf("finished phase one, printing...\n");
   #endif
 
+  #ifdef aaa
   //print stuff
   for (i=0; relations_array[i] != NULL; i++)
   {
-    printf("%s ", relations_array[i]->name);
     maximum = maximums[i];
     if (maximum > 0)
     {
+      printf("%s ", relations_array[i]->name);
       for (j=0; j<number_of_entities; j++)
       {
         if (entities_array[i][j].occurrences == 0)
@@ -796,8 +798,34 @@ int report_function(int update)
     }
   }
   printf("\n");
+  #endif
 
-  return 0;
+  for (i=0; relations_array[i] != NULL; i++)
+  {
+    maximum = maximums[i];
+    if (maximum > 0)
+    {
+      strcat(report_string, relations_array[i]->name);
+      strcat(report_string, " ");
+      for (j=0; j<number_of_entities; j++)
+      {
+        if (entities_array[i][j].occurrences == 0)
+          break;
+        if (entities_array[i][j].occurrences == maximum)
+        {
+          strcat(report_string, (entities_array[i][j].entity)->name);
+          strcat(report_string, " ");
+        }
+      }
+      sprintf(tmp_string, "%d; ", maximum);
+      strcat(report_string, tmp_string);
+    }
+  }
+
+  }
+
+  printf("%s\n", report_string);
+  return 1;
 }
 
 //debug functions---------------------------------------------------------------
@@ -920,17 +948,6 @@ int main() //main program
       printf("\nCOMMAND %d: %s\n", command_counter, input_string);
       command_counter ++;
     #endif
-    if (opcode != 4)
-    {
-      if (strcmp(input_string, last_input_sting) == 0)
-      {
-        opcode = 6;
-        #ifdef deb
-          printf("same command\n");
-        #endif
-      }
-      strcpy(last_input_sting, input_string);
-    }
 
     switch (opcode)
     {
@@ -981,20 +998,16 @@ int main() //main program
       }
       case 4: //report
       {
-        report_function(report_needed);
+        if (report_function(report_needed) != 0)
+          report_needed = 0;
         #ifdef deb
           deb_print_relations();
         #endif
-        report_needed = 0;
         break;
       }
       case 5: //end
       {
         return 0;
-        break;
-      }
-      case 6:
-      {
         break;
       }
     }
