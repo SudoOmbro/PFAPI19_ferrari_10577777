@@ -18,10 +18,13 @@ typedef struct {
   String name;
   int hash_value;
   void* first_sub_relation;
+
   void* ordered_relation; //points to the ordered relation.
   void* table_next; //Relation*
   void* table_prev; //Relation*
-  void* ord_ent_array[SUB_RELATIONS_ARRAY_SIZE];
+
+  int sub_relation_number;
+  void* sub_rel_array[SUB_RELATIONS_ARRAY_SIZE];
 } Relation;
 
 typedef struct {
@@ -261,6 +264,20 @@ Relation* create_relation(String name, int hash)
 //Create relation in hash table, create relation in ordered list and
 //return the pointer to the relation in hash table.
 
+void sub_rel_array_fixup(SubRelation** array, int start_pos, int max, SubRelation* replaced)
+{
+  SubRelation* temp;
+  for (int i=0; i<max; i++)
+  {
+    temp = array[i];
+    array[i] = replaced;
+    replaced = temp;
+  }
+}
+//given the pointer to the array to restore, the starting position, the
+//end postion and the entity that was replaced, this function restores
+//the order in the array.
+
 SubRelation* create_sub_relation(Entity* src, Relation* rel, Entity* dest)
 {
   SubRelation* self = (SubRelation*) malloc(sizeof(SubRelation));
@@ -272,6 +289,7 @@ SubRelation* create_sub_relation(Entity* src, Relation* rel, Entity* dest)
   self->table_next = NULL;
   return self;
 }
+//creates a sub relation and returns the pointer to that.
 
 SubRelation* delete_invalid_relation(SubRelation* rel)
 {
@@ -285,6 +303,7 @@ SubRelation* delete_invalid_relation(SubRelation* rel)
   free(rel);
   return next;
 }
+//deletes and invalid sub relation and returns the next pointer.
 
 int relation_add_entities(Relation* rel, Entity* src, Entity* dest, int pos)
 {
@@ -515,7 +534,7 @@ int delent_function(String name)
   #endif
   return 1;
 }
-//deallocates an entity; return 0 if succes, else 1
+//deallocates an entity; return 1 if succes, else 0
 
 int delrel_function(String name_source, String name_dest, String rel_name)
 {
@@ -578,6 +597,7 @@ int delrel_function(String name_source, String name_dest, String rel_name)
   #endif
   return 0;
 }
+//deletes a relation; return 1 if success, else 0
 
 OrdRel* delete_unused_relation(Relation* rel)
 {
@@ -762,9 +782,7 @@ int report_function(int update)
 
   for (i=0; relations_array[i] != NULL; i++)
   {
-    maximum = maximums[i];
-    //if (maximum > 0)
-    {
+      maximum = maximums[i];
       strcat(report_string, relations_array[i]->name);
       strcat(report_string, " ");
       for (j=0; j<number_of_entities; j++)
@@ -779,7 +797,6 @@ int report_function(int update)
       }
       sprintf(tmp_string, "%d; ", maximum);
       strcat(report_string, tmp_string);
-    }
   }
 
   }
@@ -804,9 +821,9 @@ void deb_print_entities()
         while (entity != NULL)
         {
           if (entity->valid == 1)
-          {
             printf("%s [id = %d], ", entity->name, entity->entity_id);
-          }
+          else
+            printf("(deallocated) [id = %d], ", entity->entity_id);
           entity = (Entity*) entity->table_next;
         }
         printf("\n");
