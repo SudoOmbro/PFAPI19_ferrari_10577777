@@ -5,6 +5,7 @@
 #define ENTITY_TABLE_SIZE 312679
 #define RELATIONS_TABLE_SIZE 13537
 #define SUB_RELATIONS_ARRAY_SIZE 16384
+#define RELATIONS_BUFFER_SIZE 16384
 
 /* add -Ddeb to gcc compiler options to compile in verbose debug mode */
 
@@ -17,11 +18,9 @@ typedef char String[50];
 typedef struct {
   String name;
   int hash_value;
-
-  void* ordered_relation; //points to the ordered relation.
+  int position;
   void* table_next; //Relation*
   void* table_prev; //Relation*
-
   int sub_relation_number;
   void* sub_rel_array[SUB_RELATIONS_ARRAY_SIZE];
 } Relation;
@@ -60,7 +59,7 @@ int last_entity_position = 0;
 Entity* entity_table[ENTITY_TABLE_SIZE];          // = table 0
 Relation* relations_table[RELATIONS_TABLE_SIZE];  // = table 1
 
-OrdRel* rel_list_head = NULL;
+Relation* relations_buffer[RELATIONS_BUFFER_SIZE];
 int number_of_relations = 0;
 
 //------------------------------------------------------------------------------
@@ -201,66 +200,6 @@ void deallocate_entity(Entity* self)
   number_of_entities --;
 }
 
-Relation* create_relation(String name, int hash)
-{
-  //create the relation to put in hash table
-  Relation* self;
-  self = (Relation*) malloc(sizeof(Relation));
-  strcpy(self->name, name);
-  self->hash_value = hash;
-  self->table_next = NULL;
-  self->table_prev = NULL;
-  //create ordered list entry
-  OrdRel* ord = (OrdRel*) malloc(sizeof(OrdRel));
-  ord->relation = self;
-  self->ordered_relation = ord;
-  self->sub_relation_number = 0;
-  OrdRel* pointer = rel_list_head;
-  OrdRel* prev_pointer = NULL;
-  //put entry in ordered list
-  while (pointer != NULL)
-  {
-    if (strcmp(self->name, (pointer->relation)->name) < 0)
-    {
-      if (prev_pointer == NULL)
-      {
-        ord->next = rel_list_head;
-        ord->prev = NULL;
-        rel_list_head = ord;
-        //ordered_relation_list_fixup(ord, 0);
-        number_of_relations ++;
-        return self;
-      }
-      prev_pointer->next = ord;
-      ord->prev = prev_pointer;
-      ord->next = pointer;
-      //ordered_relation_list_fixup(ord, prev_pointer->position+1);
-      number_of_relations ++;
-      return self;
-    }
-    prev_pointer = pointer;
-    pointer = (OrdRel*) pointer->next;
-  }
-
-  if (prev_pointer == NULL)
-  {
-    rel_list_head = ord;
-    ord->prev = NULL;
-    ord->position = 0;
-  }
-  else
-  {
-    prev_pointer->next = ord;
-    ord->prev = prev_pointer;
-    ord->position = number_of_relations;
-  }
-  ord->next = NULL;
-  number_of_relations ++;
-  return self;
-}
-//Create relation in hash table, create relation in ordered list and
-//return the pointer to the relation in hash table.
-
 void sub_rel_array_fixup(SubRelation** array, int start_pos, const int max, SubRelation* replacer)
 {
   SubRelation* temp;
@@ -275,10 +214,22 @@ void sub_rel_array_fixup(SubRelation** array, int start_pos, const int max, SubR
 //end postion and the entity that replaces, this function restores
 //the order in the array.
 
-void sub_rel_array_fixup_delete(SubRelation** array, int start_pos, const int max)
+void rel_buffer_fixup(int start_pos, Relation* replacer)
+{
+  Relation* temp;
+  for (int i=start_pos; i<number_of_relations; i++)
+  {
+    replacer->position = i;
+    temp = relations_buffer[i];
+    relations_buffer[i] = replacer;
+    replacer = temp;
+  }
+}
+
+void sub_rel_array_fixup_delete(SubRelation** array, int start_pos, int end)
 {
   int i;
-  for (i=start_pos; i<max; i++)
+  for (i=start_pos; i<end; i++)
   {
     array[i] = array[i+1];
   }
@@ -286,6 +237,54 @@ void sub_rel_array_fixup_delete(SubRelation** array, int start_pos, const int ma
 }
 //given the pointer to the array to restore, the starting position
 //and the end postion, this function restores the order in the array.
+
+void rel_buffer_fixup_delete(int start_pos)
+{
+  int i;
+  for (i=start_pos; i<number_of_relations; i++)
+  {
+    relations_buffer[i] = relations_buffer[i+1];
+    relations_buffer[i]->position = i;
+  }
+  relations_buffer[i] = NULL;
+}
+
+Relation* create_relation(String name, int hash)
+{
+  //create the relation to put in hash table
+  Relation* self;
+  int i;
+  self = (Relation*) malloc(sizeof(Relation));
+  strcpy(self->name, name);
+  self->hash_value = hash;
+  self->table_next = NULL;
+  self->table_prev = NULL;
+  self->sub_relation_number = 0;
+  //create ordered list entry
+  Relation* pointer;
+  if (number_of_relations == 0)
+  {
+    relations_buffer[0] = self;
+    number_of_relations ++;
+    return self;
+  }
+  for (i=0; i<number_of_relations; i++)
+  {
+    pointer = relations_buffer[i];
+    if (strcmp(self->name, pointer->name) < 0)
+    {
+        number_of_relations ++;
+        rel_buffer_fixup(i, self);
+        return self;
+    }
+  }
+  relations_buffer[i] = self;
+  self->position = i;
+  number_of_relations ++;
+  return self;
+}
+//Create relation in hash table, create relation in ordered list and
+//return the pointer to the relation in hash table.
 
 SubRelation* create_sub_relation(Entity* src, Relation* rel, Entity* dest)
 {
@@ -541,32 +540,22 @@ int delrel_function(String name_source, String name_dest, String rel_name)
 }
 //deletes a relation; return 1 if success, else 0
 
-OrdRel* delete_unused_relation(Relation* rel)
+void delete_unused_relation(Relation* rel)
 {
   //setup pointers
   Relation* rel_prev = (Relation*) rel->table_prev;
   Relation* rel_next = (Relation*) rel->table_next;
-  OrdRel* ord_rel = (OrdRel*) rel->ordered_relation;
-  OrdRel* ord_rel_prev = (OrdRel*) ord_rel->prev;
-  OrdRel* ord_rel_next = (OrdRel*) ord_rel->next;
-  //delete the relation
+
   if (rel_prev == NULL)
     relations_table[rel->hash_value] = rel_next;
   else
     rel_prev->table_next = rel_next;
-  free(rel);
-  //delete the ordered relation
-  if (ord_rel_prev == NULL)
-    rel_list_head = ord_rel_next;
-  else
-    ord_rel_prev->next = ord_rel_next;
-  free(ord_rel);
-  //decrease counter
+
   number_of_relations --;
-  return ord_rel_next;
+  rel_buffer_fixup_delete(rel->position);
+  free(rel);
 }
-//if it detects that a relation has 0 instances, it deletes it;
-//called from report_function.
+//returns the index of the next relation.
 
 int report_function(int update)
 {
@@ -591,7 +580,6 @@ int report_function(int update)
     int maximums[number_of_relations];
 
     //aux variables
-    OrdRel* pointer = rel_list_head;
     Entity* prev_entity;
     Entity* temp_entity;
     Relation* relation;
@@ -603,9 +591,9 @@ int report_function(int update)
     int rel_num;
 
   //get maximums and load entities in 2d array
-  while (pointer != NULL)
+  for (int h=0; h<number_of_relations; h++)
   {
-      relation = pointer->relation;
+      relation = relations_buffer[h];
       prev_entity = NULL;
       rel_num = relation->sub_relation_number;
       if (rel_num > 0)
@@ -664,7 +652,6 @@ int report_function(int update)
             free(sub_rel);
             if (k == 0)
             {
-              relation->sub_relation_number --;
               rel_num --;
               sub_rel_array_fixup_delete(array, 0, rel_num);
               #ifdef deb
@@ -673,7 +660,6 @@ int report_function(int update)
             }
             else
             {
-              relation->sub_relation_number --;
               rel_num --;
               sub_rel_array_fixup_delete(array, k, rel_num);
             }
@@ -690,8 +676,8 @@ int report_function(int update)
         if (maximums[i] > 0)
         {
           relations_array[i] = relation;
+          relation->sub_relation_number = rel_num;
           i ++;
-          pointer = (OrdRel*) pointer->next;
           #ifdef deb
             printf("maximum is > 0, added relation to report array.\n");
           #endif
@@ -701,7 +687,8 @@ int report_function(int update)
           #ifdef deb
             printf("relation %s is unused, deleting(LATE)\n", relation->name);
           #endif
-          pointer = delete_unused_relation(relation);
+          delete_unused_relation(relation);
+          h --;
         }
     }
     else
@@ -709,7 +696,8 @@ int report_function(int update)
       #ifdef deb
         printf("relation %s is unused, deleting\n", relation->name);
       #endif
-      pointer = delete_unused_relation(relation);
+      delete_unused_relation(relation);
+      h --;
     }
   }
 
@@ -794,29 +782,10 @@ void deb_print_sub_relations(Relation* rel)
 
 void deb_print_relations()
 {
-  OrdRel* rel = rel_list_head;
-  while (rel != NULL)
+  for (int i=0; i<number_of_relations; i++)
   {
-    deb_print_sub_relations(rel->relation);
-    rel = (OrdRel*) rel->next;
+    deb_print_sub_relations(relations_buffer[i]);
   }
-}
-
-void deb_print_ordered_relations()
-{
-  OrdRel* pointer = rel_list_head;
-  while(pointer != NULL)
-  {
-    printf("%d: %s\n", pointer->position, (pointer->relation)->name);
-    pointer = (OrdRel*) pointer->next;
-  }
-}
-
-void deb_print_all()
-{
-  deb_print_entities();
-  deb_print_relations();
-  deb_print_ordered_relations();
 }
 
 #endif
