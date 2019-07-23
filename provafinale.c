@@ -2,17 +2,17 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define ENTITY_TABLE_SIZE  21557
-#define RELATIONS_TABLE_SIZE 3137
+#define ENTITY_TABLE_SIZE  31793
+#define RELATIONS_TABLE_SIZE 7589
 #define SUB_RELATIONS_ARRAY_SIZE 16384
 #define RELATIONS_BUFFER_SIZE 4096
-#define COLLISION_BUFFER_SIZE 5000 //try dynamic allocation for this
+#define COLLISION_BUFFER_SIZE 3300
 
 /* add -Ddeb to gcc compiler options to compile in verbose debug mode */
 
 //type definitions--------------------------------------------------------------
 
-typedef char SuperLongString[2048];
+typedef char SuperLongString[4096];
 typedef char LongString[160];
 typedef char String[50];
 
@@ -60,21 +60,31 @@ int maximums[RELATIONS_BUFFER_SIZE];
 //------------------------------------------------------------------------------
 //functions definitions---------------------------------------------------------
 
-int hash_function(char* text, const int table_size)
+int entity_hash_function(char* text)
+{
+  int value = 1;
+  for (int i=0; text[i] != '\0'; i++)
+  {
+    value *= (text[i]*(i+1));
+  }
+  #ifdef deb
+    printf("entity hash value: %d\n", abs((value) % ENTITY_TABLE_SIZE));
+  #endif
+  return abs((value) % ENTITY_TABLE_SIZE);;
+}
+
+int relation_hash_function(char* text)
 {
   int value = 0;
   for (int i=0; text[i] != '\0'; i++)
   {
-    value += text[i]*(i+1)+text[i];
+    value += (text[i]*(i+1));
   }
-  value =  (value*17) % table_size;
   #ifdef deb
-    printf("hash value: %d\n", value);
+    printf("relation hash value: %d\n", abs((value) % RELATIONS_TABLE_SIZE));
   #endif
-  return value;
+  return abs((value) % RELATIONS_TABLE_SIZE);;
 }
-//data la grandezza della tabella e una stringa in input genera un valore
-//nel range della grandezza della tablella.
 
 int get_argument(LongString input_string, char* dest_string, int start_pos)
 {
@@ -139,21 +149,18 @@ Relation* relation_hash_table_linear_search(String name, int table_pos)
 
 int check_relation_validity(SubRelation* sub_rel)
 {
-  //if (sub_rel != NULL)
-  {
-    Entity* src = sub_rel->source;
-    Entity* dest = sub_rel->destination;
-    if (src->valid == 1 && dest->valid == 1)
-      if (src->entity_id == sub_rel->source_id && dest->entity_id == sub_rel->destination_id)
-        return 1;
-  }
+  Entity* src = sub_rel->source;
+  Entity* dest = sub_rel->destination;
+  if (src->valid == 1 && dest->valid == 1)
+    if (src->entity_id == sub_rel->source_id && dest->entity_id == sub_rel->destination_id)
+      return 1;
   return 0;
 }
 //check the validity of a relation (1 = valid, 0 = not valid).
 
 Entity* get_entity(String name)
 {
-  int pos = hash_function(name, ENTITY_TABLE_SIZE);
+  int pos = entity_hash_function(name);
   return entity_hash_table_linear_search(name, pos);
 }
 //check the hash table and see if the entity already exists,
@@ -161,7 +168,7 @@ Entity* get_entity(String name)
 
 Relation* get_relation(String name)
 {
-  int pos = hash_function(name, RELATIONS_TABLE_SIZE);
+  int pos = relation_hash_function(name);
   return relation_hash_table_linear_search(name, pos);
 }
 //check the hash table and see if the entity already exists,
@@ -400,7 +407,7 @@ int relation_add_entities(Relation* rel, Entity* src, Entity* dest, int pos)
 
 int handle_entity_creation(String name)
 {
-  int pos = hash_function(name, ENTITY_TABLE_SIZE);
+  int pos = entity_hash_function(name);
   if (entity_table[pos][0] == NULL)
   {
     entity_table[pos][0] = create_entity(name, pos);
@@ -414,20 +421,20 @@ int handle_entity_creation(String name)
     int i;
     for(i=0; i<COLLISION_BUFFER_SIZE; i++)
     {
-      if (entity_table[pos][i]->valid == 0)
-      {
-        reallocate_entity(entity_table[pos][i], name);
-        #ifdef deb
-          printf("Reallocated entity\n");
-        #endif
-        return 1;
-      }
       if (entity_table[pos][i] == NULL)
       {
         #ifdef deb
           printf("Created new entity\n");
         #endif
         entity_table[pos][i] = create_entity(name, pos);
+        return 1;
+      }
+      if (entity_table[pos][i]->valid == 0)
+      {
+        reallocate_entity(entity_table[pos][i], name);
+        #ifdef deb
+          printf("Reallocated entity\n");
+        #endif
         return 1;
       }
       if (strcmp(name, entity_table[pos][i]->name) == 0)
@@ -448,7 +455,7 @@ int handle_entity_creation(String name)
 
 int handle_relation_creation(String name1, String name2, String name)
 {
-  int pos = hash_function(name, RELATIONS_TABLE_SIZE);
+  int pos = relation_hash_function(name);
   Entity* e1 = get_entity(name1);
   Entity* e2 = get_entity(name2);
 
@@ -460,7 +467,7 @@ int handle_relation_creation(String name1, String name2, String name)
     return 0;
   }
 
-  if (relations_table[pos] == NULL)
+  if (relations_table[pos][0] == NULL)
   {
     relations_table[pos][0] = create_relation(name, pos, 0);
     #ifdef deb
@@ -563,8 +570,14 @@ int delrel_function(String name_source, String name_dest, String rel_name)
 
 void delete_unused_relation(Relation* rel)
 {
-  relations_table[rel->hash_value][rel->collision_pos] = NULL;
+  int hash = rel->hash_value;
+  int pos = rel->collision_pos;
+  //relations_table[hash][pos] = NULL;
   number_of_relations --;
+  do {
+    relations_table[hash][pos] = relations_table[hash][pos+1];
+    pos ++;
+  } while (relations_table[hash][pos] != NULL);
   rel_buffer_fixup_delete(rel->position);
   free(rel);
 }
