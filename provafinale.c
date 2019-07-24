@@ -2,25 +2,21 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define ENTITY_TABLE_SIZE  31793
-#define RELATIONS_TABLE_SIZE 7589
-#define SUB_RELATIONS_ARRAY_SIZE 16384
-#define RELATIONS_BUFFER_SIZE 4096
-#define COLLISION_BUFFER_SIZE 3300
+#define ENTITY_TABLE_SIZE  49783
+#define SUB_RELATIONS_ARRAY_SIZE 65536
+#define RELATIONS_BUFFER_SIZE 32768
+#define COLLISION_BUFFER_SIZE 4096
 
 /* add -Ddeb to gcc compiler options to compile in verbose debug mode */
 
 //type definitions--------------------------------------------------------------
 
-typedef char SuperLongString[4096];
+typedef char SuperLongString[1024];
 typedef char LongString[160];
 typedef char String[50];
 
 typedef struct {
   String name;
-  int hash_value;
-  int position;
-  int collision_pos;
   int sub_relation_number;
   void* sub_rel_array[SUB_RELATIONS_ARRAY_SIZE];
 } Relation;
@@ -29,15 +25,16 @@ typedef struct {
   String name;
   int entity_id; //add 1 when entity changes.
   int valid;     // = 1 when valid, else = 0.
+  int value;
 } Entity;
 
 typedef struct {
-  Relation* relation;
   Entity* source;
   Entity* destination;
   int source_id;
   int destination_id;
-  void* table_next; //SubRelation*
+  int source_value;
+  int destination_value;
 } SubRelation;  //the destination is the entity that contains it.
 
 typedef struct {
@@ -46,16 +43,10 @@ typedef struct {
 } Pop; //struct used during report
 
 int number_of_entities = 0;
-Entity* entity_table[ENTITY_TABLE_SIZE][COLLISION_BUFFER_SIZE];          // = table 0
-Relation* relations_table[RELATIONS_TABLE_SIZE][COLLISION_BUFFER_SIZE];  // = table 1
+Entity* entity_table[ENTITY_TABLE_SIZE][COLLISION_BUFFER_SIZE];
 
 Relation* relations_buffer[RELATIONS_BUFFER_SIZE];
 int number_of_relations = 0;
-
-//declarations of data structures used in report
-Pop entities_array[RELATIONS_BUFFER_SIZE][SUB_RELATIONS_ARRAY_SIZE];
-Relation* relations_array[RELATIONS_BUFFER_SIZE];
-int maximums[RELATIONS_BUFFER_SIZE];
 
 //------------------------------------------------------------------------------
 //functions definitions---------------------------------------------------------
@@ -71,19 +62,6 @@ int entity_hash_function(char* text)
     printf("entity hash value: %d\n", abs((value) % ENTITY_TABLE_SIZE));
   #endif
   return abs((value) % ENTITY_TABLE_SIZE);;
-}
-
-int relation_hash_function(char* text)
-{
-  int value = 0;
-  for (int i=0; text[i] != '\0'; i++)
-  {
-    value += (text[i]*(i+1));
-  }
-  #ifdef deb
-    printf("relation hash value: %d\n", abs((value) % RELATIONS_TABLE_SIZE));
-  #endif
-  return abs((value) % RELATIONS_TABLE_SIZE);;
 }
 
 int get_argument(LongString input_string, char* dest_string, int start_pos)
@@ -106,10 +84,9 @@ int get_argument(LongString input_string, char* dest_string, int start_pos)
 
 Entity* entity_hash_table_linear_search(String name, int table_pos)
 {
-  for(int i=0; i<COLLISION_BUFFER_SIZE; i++)
+  int i = 0;
+  while (entity_table[table_pos][i] != NULL)
   {
-    if (entity_table[table_pos][i] != NULL)
-    {
       if (strcmp(name, entity_table[table_pos][i]->name) == 0)
       {
         #ifdef deb
@@ -117,33 +94,11 @@ Entity* entity_hash_table_linear_search(String name, int table_pos)
         #endif
         return entity_table[table_pos][i];
       }
-    }
-    else
-      break;
+      i ++;
   }
   #ifdef deb
     printf("linear search done, no result\n");
   #endif
-  return 0;
-}
-
-Relation* relation_hash_table_linear_search(String name, int table_pos)
-{
-  for(int i=0; i<COLLISION_BUFFER_SIZE; i++)
-  {
-    if (relations_table[table_pos][i] != NULL)
-    {
-      if (strcmp(name, relations_table[table_pos][i]->name) == 0)
-      {
-        #ifdef deb
-          printf("linear search done, found relation\n");
-        #endif
-        return relations_table[table_pos][i];
-      }
-    }
-    else
-      break;
-  }
   return 0;
 }
 
@@ -160,21 +115,166 @@ int check_relation_validity(SubRelation* sub_rel)
 
 Entity* get_entity(String name)
 {
+  #ifdef deb
+    printf("getting entity %s.\n", name);
+  #endif
   int pos = entity_hash_function(name);
   return entity_hash_table_linear_search(name, pos);
 }
 //check the hash table and see if the entity already exists,
 //return 0 if it does not, else return entity.
 
+int relations_binary_search(String name, int l, int r)
+{
+  if (r >= l)
+  {
+        #ifdef deb
+          printf("binary search %d, %d\n", l, r);
+        #endif
+        int mid = l + (r - l) / 2;
+        int val = strcmp(name, relations_buffer[mid]->name);
+        if (val == 0)
+        {
+            #ifdef deb
+              printf("found relation %s.\n", name);
+            #endif
+            return mid;
+        }
+        if (val < 0)
+            return relations_binary_search(name, l, mid - 1);
+        return relations_binary_search(name, mid + 1, r);
+  }
+  #ifdef deb
+    printf("no match found for %s.\n", name);
+  #endif
+  return -1;
+}
+
+int sub_relations_binary_search(SubRelation** array, String name, int l, int r, int src_val)
+{
+  if (r >= l)
+  {
+        #ifdef deb
+          printf("binary search %d, %d\n", l, r);
+        #endif
+        int mid = l + (r - l) / 2;
+        int val = strcmp(name, (array[mid]->destination)->name);
+        if (val == 0)
+        {
+            val = array[mid]->destination_value;
+            if (val == src_val)
+            {
+              return mid;
+            }
+            #ifdef deb
+              printf("found relation %s.\n", name);
+            #endif
+            if (val < 0)
+                return sub_relations_binary_search(array, name, l, mid - 1, src_val);
+            return sub_relations_binary_search(array, name, mid + 1, r, src_val);
+        }
+        if (val < 0)
+            return sub_relations_binary_search(array, name, l, mid - 1, src_val);
+        return sub_relations_binary_search(array, name, mid + 1, r, src_val);
+  }
+  #ifdef deb
+    printf("no match found for %s.\n", name);
+  #endif
+  return -1;
+}
+
+int sub_relations_binary_search_creation(SubRelation** array, String dest_name, int l, int r, const int src_value)
+{
+  int prev = 0;
+  if (r >= l)
+  {
+        #ifdef deb
+          printf("binary search %d, %d\n", l, r);
+        #endif
+        int mid = l + (r - l) / 2;
+        int val = strcmp(dest_name, (array[mid]->destination)->name);
+        if (val == 0)
+        {
+          int tmp, pointer = mid;
+          int value = array[pointer]->destination_value;
+            #ifdef deb
+              printf("found destination %s.\n", dest_name);
+            #endif
+            while (value == array[pointer]->destination_value)
+            {
+              #ifdef deb
+                printf("checking %s\n", (array[pointer]->source)->name);
+              #endif
+              mid = pointer;
+              tmp = array[mid]->source_value;
+              if (src_value == tmp)
+              {
+                #ifdef deb
+                  printf("relation already exists.\n");
+                #endif
+                return -1;
+              }
+              if (src_value < tmp)
+              {
+                if (prev == 1)
+                  return pointer;
+                else
+                {
+                  pointer --;
+                  prev = -1;
+                }
+                if (array[pointer] == NULL)
+                  return pointer;
+                if (pointer < 0)
+                  return 0;
+              }
+              else
+              {
+                if (prev == -1)
+                  return pointer;
+                else
+                {
+                  pointer ++;
+                  prev = 1;
+                }
+                if (array[pointer] == NULL)
+                  return pointer;
+                if (pointer < 0)
+                  return 0;
+              }
+            }
+            return mid;
+        }
+        if (val < 0)
+            return sub_relations_binary_search_creation(array, dest_name, l, mid - 1, src_value);
+        return sub_relations_binary_search_creation(array, dest_name, mid + 1, r, src_value);
+  }
+  #ifdef deb
+    printf("no match found for %s, returning %d\n", dest_name, r);
+  #endif
+  if (prev == -1)
+    return r;
+  else
+    return l;
+}
+
 Relation* get_relation(String name)
 {
-  int pos = relation_hash_function(name);
-  return relation_hash_table_linear_search(name, pos);
-}
-//check the hash table and see if the entity already exists,
-//return 0 if it does not, else return relation.
+  #ifdef deb
+    printf("getting relation %s.\n", name);
+  #endif
 
-Entity* create_entity(String name, int table_pos)
+  if (number_of_relations == 0)
+    return 0;
+
+  int val = relations_binary_search(name, 0, number_of_relations-1);
+  if (val >= 0)
+    return relations_buffer[val];
+  else
+    return 0;
+}
+
+Entity* create_entity(String name, int value)
 {
   //create the entity in the hash table
   Entity* self;
@@ -182,16 +282,17 @@ Entity* create_entity(String name, int table_pos)
   strcpy(self->name, name);
   self->entity_id = 0;
   self->valid = 1;
-
+  self->value = value;
   number_of_entities ++;
   return self;
 }
 //crea entità, assegna il nome e ritorna il puntatore.
 
-void reallocate_entity(Entity* self, String name)
+void reallocate_entity(Entity* self, String name, int value)
 {
   strcpy(self->name, name);
   self->valid = 1;
+  self->value = value;
   number_of_entities ++;
 }
 
@@ -200,6 +301,7 @@ void deallocate_entity(Entity* self)
   self->entity_id ++;
   self->valid = 0;
   strcpy(self->name, "");
+  self->value = 0;
   number_of_entities --;
 }
 
@@ -222,7 +324,6 @@ void rel_buffer_fixup(int start_pos, Relation* replacer)
   Relation* temp;
   for (int i=start_pos; i<number_of_relations; i++)
   {
-    replacer->position = i;
     temp = relations_buffer[i];
     relations_buffer[i] = replacer;
     replacer = temp;
@@ -276,141 +377,85 @@ void rel_buffer_fixup_delete(int start_pos)
 {
   int i;
   for (i=start_pos; i<number_of_relations; i++)
-  {
     relations_buffer[i] = relations_buffer[i+1];
-    relations_buffer[i]->position = i;
-  }
   relations_buffer[i] = NULL;
 }
 
-Relation* create_relation(String name, int hash, int pos)
+Relation* create_relation(String name)
 {
   //create the relation to put in hash table
-  int i;
-  #ifdef deb
-    printf("executing malloc...\n");
-  #endif
   Relation* self = (Relation*) malloc(sizeof(Relation));
-  #ifdef deb
-    printf("malloc executed.\n");
-  #endif
   strcpy(self->name, name);
-  self->hash_value = hash;
-  self->collision_pos = pos;
   self->sub_relation_number = 0;
-  //create ordered list entry
-  if (number_of_relations == 0)
-  {
-    relations_buffer[0] = self;
-    number_of_relations ++;
-    return self;
-  }
-  for (i=0; i<number_of_relations; i++)
-  {
-    if (strcmp(self->name, relations_buffer[i]->name) < 0)
-    {
-        #ifdef deb
-          printf("relation is smaller\n");
-        #endif
-        number_of_relations ++;
-        rel_buffer_fixup(i, self);
-        return self;
-    }
-  }
-  #ifdef deb
-    printf("relation is bigger\n");
-  #endif
-  relations_buffer[i] = self;
-  self->position = i;
-  number_of_relations ++;
   return self;
 }
 //Create relation in hash table, create relation in ordered list and
 //return the pointer to the relation in hash table.
 
-SubRelation* create_sub_relation(Entity* src, Relation* rel, Entity* dest)
+SubRelation* create_sub_relation(Entity* src, Entity* dest)
 {
   SubRelation* self = (SubRelation*) malloc(sizeof(SubRelation));
   self->source = src;
-  self->relation = rel;
   self->destination = dest;
   self->source_id = src->entity_id;
   self->destination_id = dest->entity_id;
+  self->source_value = src->value;
+  self->destination_value = dest->value;
   return self;
 }
 //creates a sub relation and returns the pointer to that.
 
-int relation_add_entities(Relation* rel, Entity* src, Entity* dest, int pos)
+int relation_add_entities(Relation* rel, Entity* src, Entity* dest)
 {
   //setup
-  int i;
   int rel_num = rel->sub_relation_number;
   SubRelation* sub_rel;
-  SubRelation* pointer;
   SubRelation** array =  (SubRelation**) rel->sub_rel_array;
   if (rel_num == 0)
   {
     #ifdef deb
       printf("created sub relation in first slot of relation\n");
     #endif
-    array[0] = create_sub_relation(src, rel, dest);
+    array[0] = create_sub_relation(src, dest);
     rel->sub_relation_number ++;
     return 1;
   }
   else
   {
-    for (i=0; i<rel_num; i++)
+    int mid_val = sub_relations_binary_search_creation(array, dest->name, 0, rel_num-1, src->value);
+    if (mid_val != -1)
     {
-      pointer = array[i];
-      #ifdef deb
-        printf("pointer: %d\n", pointer);
-        printf("sub-relation is valid\n");
-      #endif
-      if (pointer != NULL)
-      {
-        if (pointer->source == src && pointer->destination == dest)
-        {
-            #ifdef deb
-              printf("Relation already exists.\n");
-            #endif
-            return 0;
-          }
-          else
-          {
-              if (strcmp(dest->name, (pointer->destination)->name) < 0)
-              {
-                #ifdef deb
-                printf("dest is smaller\n");
-                #endif
-                sub_rel = create_sub_relation(src, rel, dest);
-                rel->sub_relation_number ++;
-                sub_rel_array_fixup(array, i, rel_num+1, sub_rel);
-                #ifdef deb
-                  printf("added sub relation in first slot of relation\n");
-                #endif
-                return 1;
-            }
-          }
-        }
-      }
+      sub_rel = create_sub_relation(src, dest);
       rel->sub_relation_number ++;
-      sub_rel = create_sub_relation(src, rel, dest);
-      array[i] = sub_rel;
+      sub_rel_array_fixup(array, mid_val, rel_num+1, sub_rel);
       #ifdef deb
-        printf("created sub relation in last slot of relation\n");
+        printf("added sub relation in %d\n", mid_val);
       #endif
+      return 1;
+    }
+    return 0;
   }
-  return 1;
 }
 //adds entities to the new/existing relation;
 //return 0 if everything went okay, else 1.
 
 int handle_entity_creation(String name)
 {
-  int pos = entity_hash_function(name);
+  //do the hash functio but also save the value of the entity
+  int value = 1;
+  for (int i=0; name[i] != '\0'; i++)
+  {
+    value *= (name[i]*(i+1));
+  }
+  #ifdef deb
+    printf("entity hash value: %d\n", abs((value) % ENTITY_TABLE_SIZE));
+  #endif
+  int pos =  abs((value) % ENTITY_TABLE_SIZE);
+
+  //add entity into hash table.
   if (entity_table[pos][0] == NULL)
   {
-    entity_table[pos][0] = create_entity(name, pos);
+    entity_table[pos][0] = create_entity(name, value);
     #ifdef deb
       printf("Created new entity in empty slot\n");
     #endif
@@ -426,12 +471,12 @@ int handle_entity_creation(String name)
         #ifdef deb
           printf("Created new entity\n");
         #endif
-        entity_table[pos][i] = create_entity(name, pos);
+        entity_table[pos][i] = create_entity(name, value);
         return 1;
       }
       if (entity_table[pos][i]->valid == 0)
       {
-        reallocate_entity(entity_table[pos][i], name);
+        reallocate_entity(entity_table[pos][i], name, value);
         #ifdef deb
           printf("Reallocated entity\n");
         #endif
@@ -455,7 +500,6 @@ int handle_entity_creation(String name)
 
 int handle_relation_creation(String name1, String name2, String name)
 {
-  int pos = relation_hash_function(name);
   Entity* e1 = get_entity(name1);
   Entity* e2 = get_entity(name2);
 
@@ -467,40 +511,41 @@ int handle_relation_creation(String name1, String name2, String name)
     return 0;
   }
 
-  if (relations_table[pos][0] == NULL)
+  #ifdef deb
+    printf("all of the entities exist\n");
+  #endif
+
+  int i, val;
+  if (number_of_relations == 0)
   {
-    relations_table[pos][0] = create_relation(name, pos, 0);
-    #ifdef deb
-      printf("Created new relation in empty table slot\n");
-    #endif
-    return relation_add_entities(relations_table[pos][0], e1, e2, pos);
+    relations_buffer[0] = create_relation(name);
+    number_of_relations ++;
+    return relation_add_entities(relations_buffer[0], e1, e2);
   }
-  else
+  for (i=0; i<number_of_relations; i++)
   {
-    #ifdef deb
-      printf("first relation slot isn't empty\n");
-    #endif
-    int i;
-    for(i=0; i<COLLISION_BUFFER_SIZE; i++)
+    val = strcmp(name, relations_buffer[i]->name);
+    if (val == 0)
     {
-      #ifdef deb
-        printf("rel: %s\n", relations_table[pos][i]->name);
-      #endif
-      if (relations_table[pos][i] == NULL)
-      {
-        relations_table[pos][i] = create_relation(name, pos, i);
-        return relation_add_entities(relations_table[pos][i], e1, e2, pos);
-      }
-      if (strcmp(name, relations_table[pos][i]->name) == 0)
-      {
-        return relation_add_entities(relations_table[pos][i], e1, e2, pos);
-      }
+      return relation_add_entities(relations_buffer[i], e1, e2);
+    }
+    if (val < 0)
+    {
+        #ifdef deb
+          printf("relation is smaller\n");
+        #endif
+        number_of_relations ++;
+        Relation* self = create_relation(name);
+        rel_buffer_fixup(i, self);
+        return relation_add_entities(self, e1, e2);
     }
   }
   #ifdef deb
-    printf("Error\n");
+    printf("relation is bigger\n");
   #endif
-  return 0;
+  relations_buffer[i] = create_relation(name);
+  number_of_relations ++;
+  return relation_add_entities(relations_buffer[i], e1, e2);
 }
 //handle relation creation, return 0 if nothing was created, the relation
 //created or modified otherwise.
@@ -541,11 +586,14 @@ int delrel_function(String name_source, String name_dest, String rel_name)
   }
 
   //delete sub relation from relation list in relation
+  #ifdef deb
+    printf("relation does exists.\n");
+  #endif
   rel_num = rel->sub_relation_number;
   array = (SubRelation**) rel->sub_rel_array;
-  for (i=0; i<rel_num; i++)
+  i = sub_relations_binary_search(array, name_dest, 0, rel_num, dest->value);
+  if (i != -1)
   {
-    if (array[i] != NULL)
     {
       sub_rel = array[i];
       if (sub_rel->source == src && sub_rel->destination == dest)
@@ -568,20 +616,13 @@ int delrel_function(String name_source, String name_dest, String rel_name)
 }
 //deletes a relation; return 1 if success, else 0
 
-void delete_unused_relation(Relation* rel)
+void delete_unused_relation(Relation* rel, int start_pos)
 {
-  int hash = rel->hash_value;
-  int pos = rel->collision_pos;
   //relations_table[hash][pos] = NULL;
   number_of_relations --;
-  do {
-    relations_table[hash][pos] = relations_table[hash][pos+1];
-    pos ++;
-  } while (relations_table[hash][pos] != NULL);
-  rel_buffer_fixup_delete(rel->position);
+  rel_buffer_fixup_delete(start_pos);
   free(rel);
 }
-//returns the index of the next relation.
 
 int report_function(int update)
 {
@@ -610,6 +651,11 @@ int report_function(int update)
     int maximum;
     int rel_num;
     int nulls;
+
+    //declarations of data structures used
+    Pop entities_array[number_of_relations+1][SUB_RELATIONS_ARRAY_SIZE+1];
+    Relation* relations_array[number_of_relations+1];
+    int maximums[number_of_relations+1];
 
   //get maximums and load entities in 2d array
   for (int h=0; h<number_of_relations; h++)
@@ -708,7 +754,7 @@ int report_function(int update)
           #ifdef deb
             printf("relation %s is unused, deleting(LATE)\n", relation->name);
           #endif
-          delete_unused_relation(relation);
+          delete_unused_relation(relation, h);
           h --;
         }
     }
@@ -717,7 +763,7 @@ int report_function(int update)
       #ifdef deb
         printf("relation %s is unused, deleting\n", relation->name);
       #endif
-      delete_unused_relation(relation);
+      delete_unused_relation(relation, h);
       h --;
     }
   }
