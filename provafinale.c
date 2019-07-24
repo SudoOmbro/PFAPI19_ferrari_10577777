@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+//GUARDA BATCH2.2, PROBLEMA CON ORDINE SORGENTI RELAZIONI.
+
 #define ENTITY_TABLE_SIZE  49783
 #define SUB_RELATIONS_ARRAY_SIZE 65536
 #define RELATIONS_BUFFER_SIZE 32768
@@ -11,7 +13,7 @@
 
 //type definitions--------------------------------------------------------------
 
-typedef char SuperLongString[1024];
+typedef char SuperLongString[2048];
 typedef char LongString[160];
 typedef char String[50];
 
@@ -56,12 +58,12 @@ int entity_hash_function(char* text)
   int value = 1;
   for (int i=0; text[i] != '\0'; i++)
   {
-    value *= (text[i]*(i+1));
+    value += (text[i]*(i+1)*3);
   }
   #ifdef deb
     printf("entity hash value: %d\n", abs((value) % ENTITY_TABLE_SIZE));
   #endif
-  return abs((value) % ENTITY_TABLE_SIZE);;
+  return abs((value*7) % ENTITY_TABLE_SIZE);;
 }
 
 int get_argument(LongString input_string, char* dest_string, int start_pos)
@@ -161,18 +163,21 @@ int sub_relations_binary_search(SubRelation** array, String name, int l, int r, 
         int val = strcmp(name, (array[mid]->destination)->name);
         if (val == 0)
         {
-            val = array[mid]->destination_value;
+            #ifdef deb
+              printf("checking entity %s.\n", (array[mid]->source)->name);
+            #endif
+            val = array[mid]->source_value;
             if (val == src_val)
             {
               return mid;
             }
-            #ifdef deb
-              printf("found relation %s.\n", name);
-            #endif
-            if (val < 0)
+            if (val > src_val)
                 return sub_relations_binary_search(array, name, l, mid - 1, src_val);
             return sub_relations_binary_search(array, name, mid + 1, r, src_val);
         }
+        #ifdef deb
+          printf("nope.\n");
+        #endif
         if (val < 0)
             return sub_relations_binary_search(array, name, l, mid - 1, src_val);
         return sub_relations_binary_search(array, name, mid + 1, r, src_val);
@@ -207,6 +212,7 @@ int sub_relations_binary_search_creation(SubRelation** array, String dest_name, 
               #endif
               mid = pointer;
               tmp = array[mid]->source_value;
+
               if (src_value == tmp)
               {
                 #ifdef deb
@@ -214,34 +220,47 @@ int sub_relations_binary_search_creation(SubRelation** array, String dest_name, 
                 #endif
                 return -1;
               }
-              if (src_value < tmp)
+
+              #ifdef deb
+                printf("pointer = %d, prev = %d\n", pointer, prev);
+                printf("src: %d, pnt: %d\n", src_value, tmp);
+              #endif
+
+              if (src_value > tmp)
               {
                 if (prev == 1)
+                {
+                  #ifdef deb
+                    printf("found last left relation.\n");
+                  #endif
                   return pointer;
+                }
                 else
                 {
                   pointer --;
                   prev = -1;
                 }
-                if (array[pointer] == NULL)
-                  return pointer;
-                if (pointer < 0)
-                  return 0;
               }
               else
               {
                 if (prev == -1)
+                {
+                  #ifdef deb
+                    printf("found last right relation.\n");
+                  #endif
                   return pointer;
+                }
                 else
                 {
                   pointer ++;
                   prev = 1;
                 }
-                if (array[pointer] == NULL)
-                  return pointer;
-                if (pointer < 0)
-                  return 0;
               }
+
+              if (array[pointer] == NULL)
+                return pointer;
+              if (pointer < 0)
+                return 0;
             }
             return mid;
         }
@@ -445,12 +464,12 @@ int handle_entity_creation(String name)
   int value = 1;
   for (int i=0; name[i] != '\0'; i++)
   {
-    value *= (name[i]*(i+1));
+    value += (name[i]*(i+1)*3);
   }
   #ifdef deb
     printf("entity hash value: %d\n", abs((value) % ENTITY_TABLE_SIZE));
   #endif
-  int pos =  abs((value) % ENTITY_TABLE_SIZE);
+  int pos =  abs((value*7) % ENTITY_TABLE_SIZE);
 
   //add entity into hash table.
   if (entity_table[pos][0] == NULL)
@@ -574,7 +593,7 @@ int delrel_function(String name_source, String name_dest, String rel_name)
   Entity* src = get_entity(name_source);
   Entity* dest = get_entity(name_dest);
   SubRelation* sub_rel;
-  int i, rel_num;
+  int i;
   SubRelation** array;
 
   if (rel == 0 || src == 0 || dest == 0) //check if entities and relation exist.
@@ -587,27 +606,21 @@ int delrel_function(String name_source, String name_dest, String rel_name)
 
   //delete sub relation from relation list in relation
   #ifdef deb
-    printf("relation does exists.\n");
+    printf("relation may exist.\n");
   #endif
-  rel_num = rel->sub_relation_number;
   array = (SubRelation**) rel->sub_rel_array;
-  i = sub_relations_binary_search(array, name_dest, 0, rel_num, dest->value);
+  i = sub_relations_binary_search(array, name_dest, 0, rel->sub_relation_number, src->value);
   if (i != -1)
   {
-    {
       sub_rel = array[i];
-      if (sub_rel->source == src && sub_rel->destination == dest)
-      {
-        free(sub_rel);
-        rel->sub_relation_number --;
-        sub_rel_array_fixup_delete(array, i, rel->sub_relation_number);
-        //array[i]= NULL;
-        #ifdef deb
-          printf("deleted relation at i = %d\n", i);
-        #endif
-        return 1;
-      }
-    }
+      free(sub_rel);
+      rel->sub_relation_number --;
+      sub_rel_array_fixup_delete(array, i, rel->sub_relation_number);
+      //array[i]= NULL;
+      #ifdef deb
+        printf("deleted relation at i = %d\n", i);
+      #endif
+      return 1;
   }
   #ifdef deb
     printf("relation does not exist (LATE)\n");
