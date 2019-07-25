@@ -2,10 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-//GUARDA BATCH2.2, PROBLEMA CON ORDINE SORGENTI RELAZIONI.
-
 #define ENTITY_TABLE_SIZE  49783
-#define SUB_RELATIONS_ARRAY_SIZE 65536
+#define SUB_RELATIONS_ARRAY_SIZE 32768 //65536
 #define RELATIONS_BUFFER_SIZE 32768
 #define COLLISION_BUFFER_SIZE 4096
 
@@ -27,7 +25,7 @@ typedef struct {
   String name;
   int entity_id; //add 1 when entity changes.
   int valid;     // = 1 when valid, else = 0.
-  int value;
+  unsigned long value;
 } Entity;
 
 typedef struct {
@@ -35,8 +33,8 @@ typedef struct {
   Entity* destination;
   int source_id;
   int destination_id;
-  int source_value;
-  int destination_value;
+  unsigned long source_value;
+  unsigned long destination_value;
 } SubRelation;  //the destination is the entity that contains it.
 
 typedef struct {
@@ -55,15 +53,15 @@ int number_of_relations = 0;
 
 int entity_hash_function(char* text)
 {
-  int value = 1;
+  unsigned long value = 0;
   for (int i=0; text[i] != '\0'; i++)
   {
-    value += (text[i]*(i+1)*3);
+    value = 131*value + text[i];
   }
   #ifdef deb
-    printf("entity hash value: %d\n", abs((value) % ENTITY_TABLE_SIZE));
+    printf("entity hash value: %d\n", (value) % ENTITY_TABLE_SIZE);
   #endif
-  return abs((value*7) % ENTITY_TABLE_SIZE);;
+  return (value) % ENTITY_TABLE_SIZE;
 }
 
 int get_argument(LongString input_string, char* dest_string, int start_pos)
@@ -152,21 +150,21 @@ int relations_binary_search(String name, int l, int r)
   return -1;
 }
 
-int sub_relations_binary_search(SubRelation** array, String name, int l, int r, int src_val)
+int sub_relations_binary_search(SubRelation** array, String name, int l, int r, unsigned long src_val)
 {
   if (r >= l)
   {
         #ifdef deb
-          printf("binary search %d, %d\n", l, r);
+          printf("sub rel binary search %d, %d\n", l, r);
         #endif
         int mid = l + (r - l) / 2;
-        int val = strcmp(name, (array[mid]->destination)->name);
-        if (val == 0)
+        int out_val = strcmp(name, (array[mid]->destination)->name);
+        if (out_val == 0)
         {
             #ifdef deb
               printf("checking entity %s.\n", (array[mid]->source)->name);
             #endif
-            val = array[mid]->source_value;
+            unsigned long val = array[mid]->source_value;
             if (val == src_val)
             {
               return mid;
@@ -178,7 +176,7 @@ int sub_relations_binary_search(SubRelation** array, String name, int l, int r, 
         #ifdef deb
           printf("nope.\n");
         #endif
-        if (val < 0)
+        if (out_val < 0)
             return sub_relations_binary_search(array, name, l, mid - 1, src_val);
         return sub_relations_binary_search(array, name, mid + 1, r, src_val);
   }
@@ -188,93 +186,107 @@ int sub_relations_binary_search(SubRelation** array, String name, int l, int r, 
   return -1;
 }
 
-int sub_relations_binary_search_creation(SubRelation** array, String dest_name, int l, int r, const int src_value)
+int sub_relations_binary_search_creation(SubRelation** array, String dest_name, int l, int r, unsigned long src_value)
 {
-  int prev = 0;
   if (r >= l)
   {
         #ifdef deb
           printf("binary search %d, %d\n", l, r);
         #endif
-        int mid = l + (r - l) / 2;
-        int val = strcmp(dest_name, (array[mid]->destination)->name);
-        if (val == 0)
+        int mid = l + (r - l) / 2, last_valid;
+        int ext_val = strcmp(dest_name, (array[mid]->destination)->name);
+        unsigned long val;
+        if (ext_val == 0)
         {
-          int tmp, pointer = mid;
-          int value = array[pointer]->destination_value;
+            int sign;
+            unsigned long value = array[mid]->destination_value;
+            last_valid = mid;
+            val = array[mid]->source_value;
+
+            if (val < src_value)
+              sign = 1;
+            else
+              sign = -1;
+
             #ifdef deb
               printf("found destination %s.\n", dest_name);
             #endif
-            while (value == array[pointer]->destination_value)
+            while (value == array[mid]->destination_value)
             {
               #ifdef deb
-                printf("checking %s\n", (array[pointer]->source)->name);
+                printf("checking %s\n", (array[mid]->source)->name);
+                printf("src: %lu, pnt: %lu\n", src_value, val);
               #endif
-              mid = pointer;
-              tmp = array[mid]->source_value;
-
-              if (src_value == tmp)
+              if (src_value == val)
               {
                 #ifdef deb
                   printf("relation already exists.\n");
                 #endif
                 return -1;
               }
-
-              #ifdef deb
-                printf("pointer = %d, prev = %d\n", pointer, prev);
-                printf("src: %d, pnt: %d\n", src_value, tmp);
-              #endif
-
-              if (src_value > tmp)
+              if (val < src_value)
               {
-                if (prev == 1)
+                if (sign == -1)
                 {
                   #ifdef deb
-                    printf("found last left relation.\n");
+                    printf("returning BG: %d\n", last_valid);
                   #endif
-                  return pointer;
+                  return last_valid;
                 }
-                else
-                {
-                  pointer --;
-                  prev = -1;
-                }
+                #ifdef deb
+                  printf("%lu is bigger than %lu\n", src_value, val);
+                #endif
+                last_valid = mid;
+                mid ++;
+                sign = 1;
               }
               else
               {
-                if (prev == -1)
+                if (sign == 1)
                 {
                   #ifdef deb
-                    printf("found last right relation.\n");
+                    printf("returning LW: %d\n", last_valid+1);
                   #endif
-                  return pointer;
+                  return last_valid+1;
                 }
-                else
-                {
-                  pointer ++;
-                  prev = 1;
-                }
+                #ifdef deb
+                  printf("%ld is smaller than %ld\n", src_value, val);
+                #endif
+                last_valid = mid;
+                mid --;
+                sign = -1;
               }
 
-              if (array[pointer] == NULL)
-                return pointer;
-              if (pointer < 0)
+              #ifdef deb
+                printf("mid: %d\n", mid);
+              #endif
+              if (mid < 0)
                 return 0;
+              if (array[mid] == NULL)
+                return mid;
+
+              val = array[mid]->source_value;
             }
-            return mid;
+            if (sign == 1)
+              return mid;
+            return last_valid;
         }
-        if (val < 0)
+        if (ext_val < 0)
+        {
+            #ifdef deb
+              printf("int %s < %s\n", dest_name, (array[mid]->destination)->name);
+            #endif
             return sub_relations_binary_search_creation(array, dest_name, l, mid - 1, src_value);
+        }
+        #ifdef deb
+          printf("int %s > %s\n", dest_name, (array[mid]->destination)->name);
+        #endif
         return sub_relations_binary_search_creation(array, dest_name, mid + 1, r, src_value);
   }
   #ifdef deb
-    printf("no match found for %s, returning %d\n", dest_name, r);
+    printf("r(%d) < l(%d)\n", r, l);
   #endif
-  if (prev == -1)
-    return r;
-  else
-    return l;
+  return l;
 }
 
 Relation* get_relation(String name)
@@ -293,7 +305,7 @@ Relation* get_relation(String name)
     return 0;
 }
 
-Entity* create_entity(String name, int value)
+Entity* create_entity(String name, unsigned long value)
 {
   //create the entity in the hash table
   Entity* self;
@@ -307,7 +319,7 @@ Entity* create_entity(String name, int value)
 }
 //crea entità, assegna il nome e ritorna il puntatore.
 
-void reallocate_entity(Entity* self, String name, int value)
+void reallocate_entity(Entity* self, String name, unsigned long value)
 {
   strcpy(self->name, name);
   self->valid = 1;
@@ -327,12 +339,14 @@ void deallocate_entity(Entity* self)
 void sub_rel_array_fixup(SubRelation** array, int start_pos, const int max, SubRelation* replacer)
 {
   SubRelation* temp;
-  for (int i=start_pos; i<max; i++)
+  int i;
+  for (i=start_pos; i<max; i++)
   {
     temp = array[i];
     array[i] = replacer;
     replacer = temp;
   }
+  array[i] = NULL;
 }
 //given the pointer to the array to restore, the starting position, the
 //end postion and the entity that replaces, this function restores
@@ -353,9 +367,7 @@ void sub_rel_array_fixup_delete(SubRelation** array, int start_pos, int end)
 {
   int i;
   for (i=start_pos; i<end; i++)
-  {
     array[i] = array[i+1];
-  }
 }
 //given the pointer to the array to restore, the starting position
 //and the end postion, this function restores the order in the array.
@@ -363,30 +375,32 @@ void sub_rel_array_fixup_delete(SubRelation** array, int start_pos, int end)
 void sub_rel_array_fixup_delete_optimized(SubRelation** array, int end)
 {
   #ifdef deb
-    printf("array fixup optimized\n");
+    printf("array fixup optimized, end: %d\n", end);
   #endif
 
-  int i, nulls = 0;
-
-  for(i=0; i<end; i++)
+  if (end > 0)
   {
-    if (array[i] == NULL)
-    {
-      nulls = 1;
-      break;
-    }
-  }
+    int i, nulls = 0;
 
-  while (i < end)
-  {
-    if (array[i+nulls] != NULL)
+    for(i=0; i<end; i++)
     {
-      array[i] = array[i+nulls];
-      i ++;
+      if (array[i] == NULL)
+      {
+        nulls = 1;
+        break;
+      }
     }
-    else
+    while (i < end)
     {
-      nulls ++;
+      if (array[i+nulls] != NULL)
+      {
+        array[i] = array[i+nulls];
+        i ++;
+      }
+      else
+      {
+        nulls ++;
+      }
     }
   }
 }
@@ -413,6 +427,9 @@ Relation* create_relation(String name)
 
 SubRelation* create_sub_relation(Entity* src, Entity* dest)
 {
+  #ifdef deb
+    printf("creating sub-relation...\n");
+  #endif
   SubRelation* self = (SubRelation*) malloc(sizeof(SubRelation));
   self->source = src;
   self->destination = dest;
@@ -444,6 +461,9 @@ int relation_add_entities(Relation* rel, Entity* src, Entity* dest)
     int mid_val = sub_relations_binary_search_creation(array, dest->name, 0, rel_num-1, src->value);
     if (mid_val != -1)
     {
+      #ifdef deb
+        printf("found a spot\n");
+      #endif
       sub_rel = create_sub_relation(src, dest);
       rel->sub_relation_number ++;
       sub_rel_array_fixup(array, mid_val, rel_num+1, sub_rel);
@@ -461,15 +481,16 @@ int relation_add_entities(Relation* rel, Entity* src, Entity* dest)
 int handle_entity_creation(String name)
 {
   //do the hash functio but also save the value of the entity
-  int value = 1;
+  unsigned long value = 0;
   for (int i=0; name[i] != '\0'; i++)
   {
-    value += (name[i]*(i+1)*3);
+    value = 131*value + name[i];
   }
   #ifdef deb
-    printf("entity hash value: %d\n", abs((value) % ENTITY_TABLE_SIZE));
+    printf("entity value: %d\n", value);
+    printf("entity hash value: %d\n", (value) % ENTITY_TABLE_SIZE);
   #endif
-  int pos =  abs((value*7) % ENTITY_TABLE_SIZE);
+  int pos = (value) % ENTITY_TABLE_SIZE;
 
   //add entity into hash table.
   if (entity_table[pos][0] == NULL)
@@ -609,7 +630,7 @@ int delrel_function(String name_source, String name_dest, String rel_name)
     printf("relation may exist.\n");
   #endif
   array = (SubRelation**) rel->sub_rel_array;
-  i = sub_relations_binary_search(array, name_dest, 0, rel->sub_relation_number, src->value);
+  i = sub_relations_binary_search(array, name_dest, 0, rel->sub_relation_number-1, src->value);
   if (i != -1)
   {
       sub_rel = array[i];
@@ -653,6 +674,8 @@ int report_function(int update)
     //report string
     strcpy(report_string, "");
 
+    SuperLongString entities_string;
+
     //aux variables
     Entity* prev_entity;
     Entity* temp_entity;
@@ -660,15 +683,10 @@ int report_function(int update)
     SubRelation* sub_rel;
     SubRelation** array;
     char tmp_string[20];
-    int i = 0, j, k, temp_counter = 0;
+    int i = 0, k, temp_counter = 0;
     int maximum;
     int rel_num;
     int nulls;
-
-    //declarations of data structures used
-    Pop entities_array[number_of_relations+1][SUB_RELATIONS_ARRAY_SIZE+1];
-    Relation* relations_array[number_of_relations+1];
-    int maximums[number_of_relations+1];
 
   //get maximums and load entities in 2d array
   for (int h=0; h<number_of_relations; h++)
@@ -681,7 +699,7 @@ int report_function(int update)
         #ifdef deb
           printf("relation %s is valid, accessing sub-relations\n", relation->name);
         #endif
-        maximums[i] = j = temp_counter = 0;
+        temp_counter = maximum = 0;
         array = (SubRelation**) relation->sub_rel_array;
         nulls = 0;
         for (k=0; k<rel_num; k++)
@@ -704,14 +722,20 @@ int report_function(int update)
             {
               if (prev_entity != NULL)
               {
-                if (temp_counter > maximums[i])
-                  maximums[i] = temp_counter;
-                entities_array[i][j].entity = prev_entity;
-                entities_array[i][j].occurrences = temp_counter;
+                if (temp_counter > maximum)
+                {
+                  maximum = temp_counter;
+                  strcpy(entities_string, prev_entity->name);
+                  strcat(entities_string, " ");
+                }
+                else if (temp_counter == maximum)
+                {
+                  strcat(entities_string, prev_entity->name);
+                  strcat(entities_string, " ");
+                }
                 #ifdef deb
-                  printf("%d|%d: %s, %d;\n", i, j, prev_entity->name, temp_counter);
+                  printf("%d: %s, %d;\n", i, prev_entity->name, temp_counter);
                 #endif
-                j ++;
                 prev_entity = temp_entity;
                 temp_counter = 1;
                 #ifdef deb
@@ -748,15 +772,25 @@ int report_function(int update)
           sub_rel_array_fixup_delete_optimized(array, relation->sub_relation_number);
         }
 
-        if (temp_counter > maximums[i])
-          maximums[i] = temp_counter;
-        entities_array[i][j].entity = prev_entity;
-        entities_array[i][j].occurrences = temp_counter;
-        entities_array[i][j+1].occurrences = 0;
-
-        if (maximums[i] > 0)
+        if (temp_counter > maximum)
         {
-          relations_array[i] = relation;
+          maximum = temp_counter;
+          strcpy(entities_string, prev_entity->name);
+          strcat(entities_string, " ");
+        }
+        else if (temp_counter != 0 && temp_counter == maximum)
+        {
+          strcat(entities_string, prev_entity->name);
+          strcat(entities_string, " ");
+        }
+
+        if (maximum > 0)
+        {
+          strcat(report_string, relation->name);
+          strcat(report_string, " ");
+          strcat(report_string, entities_string);
+          sprintf(tmp_string, "%d; ", maximum);
+          strcat(report_string, tmp_string);
           i ++;
           #ifdef deb
             printf("maximum is > 0, added relation to report array.\n");
@@ -781,40 +815,9 @@ int report_function(int update)
     }
   }
 
-  relations_array[i] = NULL;
-
   #ifdef deb
     printf("finished phase one, printing...\n");
   #endif
-
-  if (relations_array[0] == NULL)
-  {
-    #ifdef deb
-      printf("(LATE)\n");
-    #endif
-    printf("none\n");
-    return 0;
-  }
-
-  for (i=0; relations_array[i] != NULL; i++)
-  {
-      maximum = maximums[i];
-      strcat(report_string, relations_array[i]->name);
-      strcat(report_string, " ");
-      for (j=0; j<number_of_entities; j++)
-      {
-        if (entities_array[i][j].occurrences == 0)
-          break;
-        if (entities_array[i][j].occurrences == maximum)
-        {
-          strcat(report_string, (entities_array[i][j].entity)->name);
-          strcat(report_string, " ");
-        }
-      }
-      sprintf(tmp_string, "%d; ", maximum);
-      strcat(report_string, tmp_string);
-  }
-
   }
 
   printf("%s\n", report_string);
@@ -957,6 +960,7 @@ int main() //main program
         if (handle_relation_creation(argument0, argument1, argument2) != 0)
           report_needed = 1;
         #ifdef deb
+          deb_print_entities();
           deb_print_relations();
         #endif
         break;
@@ -980,6 +984,7 @@ int main() //main program
         if (delrel_function(argument0, argument1, argument2) != 0)
           report_needed = 1;
         #ifdef deb
+          deb_print_entities();
           deb_print_relations();
         #endif
         break;
@@ -989,6 +994,7 @@ int main() //main program
         if (report_function(report_needed) != 0)
           report_needed = 0;
         #ifdef deb
+          deb_print_entities();
           deb_print_relations();
         #endif
         break;
