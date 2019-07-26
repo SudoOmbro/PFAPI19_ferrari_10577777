@@ -4,8 +4,8 @@
 
 #define ENTITY_TABLE_SIZE  49783
 #define SUB_RELATIONS_ARRAY_SIZE 80000 //65536
-#define RELATIONS_BUFFER_SIZE 4096 //32768
-#define COLLISION_BUFFER_SIZE 512
+#define RELATIONS_BUFFER_SIZE 32768 //4096 //32768
+#define COLLISION_BUFFER_SIZE 1024
 
 /* add -Ddeb to gcc compiler options to compile in verbose debug mode */
 
@@ -222,10 +222,10 @@ int sub_relations_binary_search_creation(SubRelation** array, String dest_name, 
               #endif
               if (src_value == val)
               {
-                #ifdef deb
-                  printf("relation already exists.\n");
-                #endif
-                return -1;
+                  #ifdef deb
+                    printf("relation already exists.\n");
+                  #endif
+                  return -1;
               }
               if (val < src_value)
               {
@@ -334,8 +334,6 @@ void deallocate_entity(Entity* self)
 {
   self->entity_id ++;
   self->valid = 0;
-  //strcpy(self->name, "");
-  //self->value = 0;
   number_of_entities --;
 }
 
@@ -782,6 +780,7 @@ int report_function(int update)
         {
           relation->sub_relation_number -= nulls;
           sub_rel_array_fixup_delete_optimized(array, relation->sub_relation_number);
+          array[relation->sub_relation_number] = NULL;
         }
 
         if (temp_counter > maximum)
