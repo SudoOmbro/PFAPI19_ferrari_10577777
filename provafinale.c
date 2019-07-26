@@ -3,15 +3,15 @@
 #include <string.h>
 
 #define ENTITY_TABLE_SIZE  49783
-#define SUB_RELATIONS_ARRAY_SIZE 32768 //65536
-#define RELATIONS_BUFFER_SIZE 32768
-#define COLLISION_BUFFER_SIZE 4096
+#define SUB_RELATIONS_ARRAY_SIZE 80000 //65536
+#define RELATIONS_BUFFER_SIZE 4096 //32768
+#define COLLISION_BUFFER_SIZE 512
 
 /* add -Ddeb to gcc compiler options to compile in verbose debug mode */
 
 //type definitions--------------------------------------------------------------
 
-typedef char SuperLongString[2048];
+typedef char SuperLongString[8192];
 typedef char LongString[160];
 typedef char String[50];
 
@@ -87,6 +87,8 @@ Entity* entity_hash_table_linear_search(String name, int table_pos)
   int i = 0;
   while (entity_table[table_pos][i] != NULL)
   {
+    if (entity_table[table_pos][i]->valid == 1)
+    {
       if (strcmp(name, entity_table[table_pos][i]->name) == 0)
       {
         #ifdef deb
@@ -94,7 +96,8 @@ Entity* entity_hash_table_linear_search(String name, int table_pos)
         #endif
         return entity_table[table_pos][i];
       }
-      i ++;
+    }
+    i ++;
   }
   #ifdef deb
     printf("linear search done, no result\n");
@@ -193,7 +196,8 @@ int sub_relations_binary_search_creation(SubRelation** array, String dest_name, 
         #ifdef deb
           printf("binary search %d, %d\n", l, r);
         #endif
-        int mid = l + (r - l) / 2, last_valid;
+        int mid = l + (r - l) / 2;
+        int last_valid;
         int ext_val = strcmp(dest_name, (array[mid]->destination)->name);
         unsigned long val;
         if (ext_val == 0)
@@ -202,7 +206,6 @@ int sub_relations_binary_search_creation(SubRelation** array, String dest_name, 
             unsigned long value = array[mid]->destination_value;
             last_valid = mid;
             val = array[mid]->source_value;
-
             if (val < src_value)
               sign = 1;
             else
@@ -331,8 +334,8 @@ void deallocate_entity(Entity* self)
 {
   self->entity_id ++;
   self->valid = 0;
-  strcpy(self->name, "");
-  self->value = 0;
+  //strcpy(self->name, "");
+  //self->value = 0;
   number_of_entities --;
 }
 
@@ -368,6 +371,7 @@ void sub_rel_array_fixup_delete(SubRelation** array, int start_pos, int end)
   int i;
   for (i=start_pos; i<end; i++)
     array[i] = array[i+1];
+  array[i] = NULL;
 }
 //given the pointer to the array to restore, the starting position
 //and the end postion, this function restores the order in the array.
@@ -459,7 +463,7 @@ int relation_add_entities(Relation* rel, Entity* src, Entity* dest)
   else
   {
     int mid_val = sub_relations_binary_search_creation(array, dest->name, 0, rel_num-1, src->value);
-    if (mid_val != -1)
+    if (mid_val > -1)
     {
       #ifdef deb
         printf("found a spot\n");
@@ -571,13 +575,13 @@ int handle_relation_creation(String name1, String name2, String name)
     }
     if (val < 0)
     {
-        #ifdef deb
-          printf("relation is smaller\n");
-        #endif
-        number_of_relations ++;
-        Relation* self = create_relation(name);
-        rel_buffer_fixup(i, self);
-        return relation_add_entities(self, e1, e2);
+      #ifdef deb
+        printf("relation is smaller\n");
+      #endif
+      number_of_relations ++;
+      Relation* self = create_relation(name);
+      rel_buffer_fixup(i, self);
+      return relation_add_entities(self, e1, e2);
     }
   }
   #ifdef deb
@@ -611,16 +615,25 @@ int delent_function(String name)
 int delrel_function(String name_source, String name_dest, String rel_name)
 {
   Relation* rel = get_relation(rel_name);
+
+  if (rel == 0)
+  {
+    #ifdef deb
+      printf("relation does not exist.\n");
+    #endif
+    return 0;
+  }
+
   Entity* src = get_entity(name_source);
   Entity* dest = get_entity(name_dest);
   SubRelation* sub_rel;
   int i;
   SubRelation** array;
 
-  if (rel == 0 || src == 0 || dest == 0) //check if entities and relation exist.
+  if(src == 0 || dest == 0) //check if entities and relation exist.
   {
     #ifdef deb
-      printf("relation does not exist.\n");
+      printf("one of the entities does not exist.\n");
     #endif
     return 0;
   }
@@ -631,13 +644,12 @@ int delrel_function(String name_source, String name_dest, String rel_name)
   #endif
   array = (SubRelation**) rel->sub_rel_array;
   i = sub_relations_binary_search(array, name_dest, 0, rel->sub_relation_number-1, src->value);
-  if (i != -1)
+  if (i > -1)
   {
       sub_rel = array[i];
       free(sub_rel);
       rel->sub_relation_number --;
       sub_rel_array_fixup_delete(array, i, rel->sub_relation_number);
-      //array[i]= NULL;
       #ifdef deb
         printf("deleted relation at i = %d\n", i);
       #endif
@@ -911,29 +923,37 @@ int main() //main program
   String argument0;
   String argument1;
   String argument2;
-  LongString input_string, prev_command;
+  LongString input_string;
+  LongString prev_command = "";
   int report_needed = 1; // 0 = report has not changed, 1 = report has changed.
   #ifdef deb
     int command_counter = 0;
   #endif
 
-  int opcode, prev_opcode;
+  int opcode, prev_opcode = 5;
   while (1)
   {
     fgets(input_string, 160, stdin);
     opcode = generate_opcode(input_string);
 
-    if (prev_opcode == opcode)
+    if (opcode != 4)
     {
-      if (opcode != 4)
+      if (prev_opcode == opcode)
       {
         if (strcmp(prev_command, input_string) == 0)
           opcode = 6;
+        else
+        {
+          prev_opcode = opcode;
+          strcpy(prev_command, input_string);
+        }
+      }
+      else
+      {
+        prev_opcode = opcode;
+        strcpy(prev_command, input_string);
       }
     }
-
-    prev_opcode = opcode;
-    strcpy(prev_command, input_string);
 
     #ifdef deb
       printf("\nCOMMAND %d: %s\n", command_counter, input_string);
