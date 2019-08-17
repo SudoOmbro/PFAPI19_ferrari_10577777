@@ -2,10 +2,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+//cambia report in modo che non guardi se le entità esistono
+//se sa che non sono state eliminate entità dall'ultimo report
+
+
 #define ENTITY_TABLE_SIZE  6451 //6451
 #define SUB_RELATIONS_ARRAY_SIZE 131072 //78024
 #define RELATIONS_BUFFER_SIZE 4096
-#define COLLISION_BUFFER_SIZE 32 //32
+#define COLLISION_BUFFER_SIZE 16 //32
 
 /* add -Ddeb to gcc compiler options to compile in verbose debug mode */
 
@@ -315,7 +319,13 @@ SubRelation* create_sub_relation(unsigned long src, unsigned long dest, String d
   SubRelation* self = (SubRelation*) malloc(sizeof(SubRelation));
   self->source_value = src;
   self->destination_value = dest;
+  #ifdef deb
+    printf("doing memcpy...\n");
+  #endif
   memcpy(self->dest_name, dest_name, sizeof(String));
+  #ifdef deb
+    printf("memcpy done\n");
+  #endif
   return self;
 }
 //creates a sub relation and returns the pointer to that.
@@ -539,7 +549,7 @@ int delrel_function(unsigned long entity_table[ENTITY_TABLE_SIZE][COLLISION_BUFF
 }
 //deletes a relation; return 1 if success, else 0
 
-int check_sub_rel_validity(SubRelation* sub_rel, unsigned long* del_array, int del_num)
+int check_sub_rel_validity(SubRelation* sub_rel, unsigned long del_array[1024], int del_num)
 {
   unsigned long dest = sub_rel->destination_value;
   unsigned long src = sub_rel->source_value;
@@ -568,7 +578,7 @@ int report_function(unsigned long entity_table[ENTITY_TABLE_SIZE][COLLISION_BUFF
   {
     //report string
     SuperLongString entities_string;
-    strcpy(report_string, "");
+    memcpy(report_string, "", sizeof(SuperLongString));
 
     //aux variables
     unsigned long prev_entity;
@@ -603,6 +613,7 @@ int report_function(unsigned long entity_table[ENTITY_TABLE_SIZE][COLLISION_BUFF
         prev_rel = array[0];
         prev_entity = prev_rel->destination_value;
         temp_counter = maximum = 0;
+
         for (k=0; k<rel_num; k++)
         {
           sub_rel = array[k];
@@ -828,7 +839,7 @@ void deb_print_sub_relations(Relation* rel)
   {
       if (array[i] != NULL)
       {
-        printf("%d: %s --%s--> %s\n", i, array[i]->source_value, rel->name, array[i]->destination_value);
+        printf("%d: %lu --%s--> %lu\n", i, array[i]->source_value, rel->name, array[i]->destination_value);
       }
       else
         printf("%d: NULLED\n", i);
@@ -907,7 +918,7 @@ int main() //main program
         else
         {
           prev_opcode = opcode;
-          strcpy(prev_command, input_string);
+          memcpy(prev_command, input_string, sizeof(LongString));
         }
       }
       else
