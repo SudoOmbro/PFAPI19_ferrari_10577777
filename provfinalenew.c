@@ -3,9 +3,10 @@
 #include <string.h>
 
 #define ENTITY_TABLE_SIZE  6451 //6451
-#define SUB_RELATIONS_ARRAY_SIZE 131072 //78024
+#define SUB_RELATIONS_ARRAY_SIZE 98304 //78024
 #define RELATIONS_BUFFER_SIZE 4096
-#define COLLISION_BUFFER_SIZE 32 //32
+#define COLLISION_BUFFER_SIZE 21 //32
+#define BUFF_ALLOC 76
 
 /* add -Ddeb to gcc compiler options to compile in verbose debug mode */
 
@@ -24,6 +25,7 @@ typedef struct {
 typedef struct {
   String name;
   unsigned long value;
+  int rel_num;
 } Entity;
 
 typedef struct {
@@ -223,11 +225,12 @@ Relation* get_relation(Relation* relations_buffer[RELATIONS_BUFFER_SIZE], String
   #ifdef deb
     printf("getting relation %s.\n", name);
   #endif
+  int rel_num = number_of_relations;
 
-  if (number_of_relations == 0)
+  if (rel_num == 0)
     return 0;
 
-  int val = relations_binary_search(relations_buffer, name, 0, number_of_relations-1);
+  int val = relations_binary_search(relations_buffer, name, 0, rel_num-1);
   if (val != -1)
     return relations_buffer[val];
   else
@@ -241,6 +244,7 @@ Entity* create_entity(String name, unsigned long value)
   self = (Entity*) malloc(sizeof(Entity));
   strcpy(self->name, name);
   self->value = value;
+  self->rel_num = 0;
   return self;
 }
 //crea entità, assegna il nome e ritorna il puntatore.
@@ -258,14 +262,10 @@ void sub_rel_array_fixup(SubRelation** array, int start_pos, const int max, SubR
 
 void rel_buffer_fixup(Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int start_pos, Relation* replacer)
 {
-  Relation* temp;
-  int rel_num = number_of_relations;
-  for (int i=start_pos; i<rel_num; i++)
-  {
-    temp = relations_buffer[i];
-    relations_buffer[i] = replacer;
-    replacer = temp;
-  }
+  int i;
+  for (i=number_of_relations; i>start_pos; i--)
+    relations_buffer[i] = relations_buffer[i-1];
+  relations_buffer[i] = replacer;
 }
 
 void sub_rel_array_fixup_delete(SubRelation** array, int start_pos, int end)
@@ -281,7 +281,8 @@ void sub_rel_array_fixup_delete(SubRelation** array, int start_pos, int end)
 void rel_buffer_fixup_delete(Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int start_pos)
 {
   int i;
-  for (i=start_pos; i<number_of_relations; i++)
+  int rel_num = number_of_relations;
+  for (i=start_pos; i<rel_num; i++)
     relations_buffer[i] = relations_buffer[i+1];
   relations_buffer[i] = NULL;
 }
@@ -290,7 +291,7 @@ Relation* create_relation(String name)
 {
   //create the relation to put in hash table
   Relation* self = (Relation*) malloc(sizeof(Relation));
-  strcpy(self->name, name);
+  memcpy(self->name, name, sizeof(String));
   self->sub_relation_number = 0;
   return self;
 }
@@ -306,7 +307,9 @@ SubRelation* create_sub_relation(Entity* src, Entity* dest)
   self->source = src;
   self->destination = dest;
   self->source_value = src->value;
-  strcpy(self->dest_name, dest->name);
+  memcpy(self->dest_name, dest->name, sizeof(String));
+  src->rel_num ++;
+  dest->rel_num ++;
   return self;
 }
 //creates a sub relation and returns the pointer to that.
@@ -349,7 +352,7 @@ int relation_add_entities(Relation* rel, Entity* src, Entity* dest)
 //adds entities to the new/existing relation;
 //return 0 if everything went okay, else 1.
 
-int handle_entity_creation(Entity* entity_table[][COLLISION_BUFFER_SIZE], String name)
+int handle_entity_creation_old(Entity* entity_table[][COLLISION_BUFFER_SIZE], String name)
 {
   //do the hash functio but also save the value of the entity
   unsigned long value = 0;
@@ -388,6 +391,7 @@ int handle_entity_creation(Entity* entity_table[][COLLISION_BUFFER_SIZE], String
     Entity* ent = entity_table[pos][first_free_pos];
     strcpy(ent->name, name);
     ent->value = value;
+    ent->rel_num = 0;
     #ifdef deb
       printf("Reallocated entity\n");
     #endif
@@ -395,58 +399,55 @@ int handle_entity_creation(Entity* entity_table[][COLLISION_BUFFER_SIZE], String
 }
 //handle entity creation, return the created entity if success, else 0
 
-int handle_relation_creation_old(Entity* entity_table[ENTITY_TABLE_SIZE][COLLISION_BUFFER_SIZE], Relation* relations_buffer[RELATIONS_BUFFER_SIZE], String name1, String name2, String name)
+int handle_entity_creation(Entity* entity_table[][COLLISION_BUFFER_SIZE], String name)
 {
-  Entity* e1 = get_entity(entity_table, name1);
-  Entity* e2 = get_entity(entity_table, name2);
-
-  if (e1 == 0 || e2 == 0) //check if entities exist.
+  //do the hash functio but also save the value of the entity
+  unsigned long value = 0;
+  for (int i=1; name[i] != '"'; i++)
   {
-    #ifdef deb
-      printf("one of the entities does not exist\n");
-    #endif
-    return 0;
+    value = 131*value + name[i];
   }
-
   #ifdef deb
-    printf("all of the entities exist\n");
+    printf("entity value: %d\n", value);
+    printf("entity hash value: %d\n", (value) % ENTITY_TABLE_SIZE);
   #endif
+  int pos = (value) % ENTITY_TABLE_SIZE;
 
-  int i, val;
-  if (number_of_relations == 0)
-  {
-    relations_buffer[0] = create_relation(name);
-    number_of_relations ++;
-    return relation_add_entities(relations_buffer[0], e1, e2);
-  }
-  int rel_num = number_of_relations;
-  for (i=0; i<rel_num; i++)
-  {
-    val = strcmp(name, relations_buffer[i]->name);
-    if (val == 0)
+    int i;
+    int first_free_pos = -1;
+    for(i=0; entity_table[pos][i] != NULL; i++)
     {
-      return relation_add_entities(relations_buffer[i], e1, e2);
+      if (entity_table[pos][i]->value == 0)
+        first_free_pos = i;
+      else if (value == entity_table[pos][i]->value)
+      {
+        #ifdef deb
+          printf("Entity already exists\n");
+        #endif
+        return 0;
+      }
     }
-    if (val < 0)
+
+    if (first_free_pos == -1)
     {
+      entity_table[pos][i] = create_entity(name, value);
       #ifdef deb
-        printf("relation is smaller\n");
+        printf("Created new entity\n");
       #endif
-      number_of_relations ++;
-      Relation* self = create_relation(name);
-      rel_buffer_fixup(relations_buffer, i, self);
-      return relation_add_entities(self, e1, e2);
     }
-  }
-  #ifdef deb
-    printf("relation is bigger\n");
-  #endif
-  relations_buffer[i] = create_relation(name);
-  number_of_relations ++;
-  return relation_add_entities(relations_buffer[i], e1, e2);
+    else
+    {
+      Entity* ent = entity_table[pos][first_free_pos];
+      strcpy(ent->name, name);
+      ent->value = value;
+      ent->rel_num = 0;
+      #ifdef deb
+        printf("Reallocated entity\n");
+      #endif
+    }
+    return 1;
 }
-//handle relation creation, return 0 if nothing was created, the relation
-//created or modified otherwise.
+//handle entity creation, return the created entity if success, else 0
 
 int handle_relation_creation(Entity* entity_table[ENTITY_TABLE_SIZE][COLLISION_BUFFER_SIZE], Relation* relations_buffer[RELATIONS_BUFFER_SIZE], String name1, String name2, String name)
 {
@@ -520,13 +521,14 @@ Entity* delent_function(Entity* entity_table[ENTITY_TABLE_SIZE][COLLISION_BUFFER
   #ifdef deb
     printf("deallocated entity at %x\n", entity);
   #endif
-  return entity;
+  if (entity->rel_num != 0)
+    return entity;
+  return 0;
 }
 //deallocates an entity; return 1 if succes, else 0
 
 void delete_unused_relation(Relation* relations_buffer[RELATIONS_BUFFER_SIZE], Relation* rel, int start_pos)
 {
-  //relations_table[hash][pos] = NULL;
   number_of_relations --;
   rel_buffer_fixup_delete(relations_buffer, start_pos);
   free(rel);
@@ -570,6 +572,8 @@ int delrel_function(Entity* entity_table[ENTITY_TABLE_SIZE][COLLISION_BUFFER_SIZ
       sub_rel = array[i];
       free(sub_rel);
       rel->sub_relation_number --;
+      src->rel_num --;
+      dest->rel_num --;
       sub_rel_array_fixup_delete(array, i, rel->sub_relation_number);
       #ifdef deb
         printf("deleted relation at i = %d\n", i);
@@ -598,6 +602,16 @@ int check_sub_rel_validity(SubRelation* sub_rel, Entity** del_array, int del_num
   return 1;
 }
 
+int check_entity_validity(Entity* entity, Entity** array, int del_num)
+{
+  for (int i=0; i<del_num; i++)
+  {
+    if (entity == array[i])
+      return 0;
+  }
+  return 1;
+}
+
 int report_function(Entity* entity_table[ENTITY_TABLE_SIZE][COLLISION_BUFFER_SIZE], Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int update, Entity** del_array, int del_num)
 {
   //if there are no relations, do nothing
@@ -613,7 +627,7 @@ int report_function(Entity* entity_table[ENTITY_TABLE_SIZE][COLLISION_BUFFER_SIZ
   {
     //report string
     SuperLongString entities_string;
-    strcpy(report_string, "");
+    memcpy(report_string, "", 1);
 
     //aux variables
     Entity* prev_entity;
@@ -626,6 +640,7 @@ int report_function(Entity* entity_table[ENTITY_TABLE_SIZE][COLLISION_BUFFER_SIZ
     int i = 0, k, temp_counter = 0;
     int maximum;
     int rel_num;
+    int rr = number_of_relations;
 
   //get maximums and load entities in 2d array
 
@@ -635,7 +650,7 @@ int report_function(Entity* entity_table[ENTITY_TABLE_SIZE][COLLISION_BUFFER_SIZ
     printf("relations have been deleted.\n");
   #endif
 
-  for (int h=0; h<number_of_relations; h++)
+  for (int h=0; h<rr; h++)
   {
       relation = relations_buffer[h];
       rel_num = relation->sub_relation_number;
@@ -725,6 +740,15 @@ int report_function(Entity* entity_table[ENTITY_TABLE_SIZE][COLLISION_BUFFER_SIZ
             printf("maximum is > 0, added relation to report array.\n");
           #endif
         }
+        else
+        {
+        #ifdef deb
+          printf("relation %s is unused, deleting (LATE)\n", relation->name);
+        #endif
+          delete_unused_relation(relations_buffer, relation, h);
+          rr --;
+          h --;
+        }
     }
     else
     {
@@ -732,6 +756,7 @@ int report_function(Entity* entity_table[ENTITY_TABLE_SIZE][COLLISION_BUFFER_SIZ
       printf("relation %s is unused, deleting\n", relation->name);
     #endif
       delete_unused_relation(relations_buffer, relation, h);
+      rr --;
       h --;
     }
   }
@@ -742,7 +767,7 @@ int report_function(Entity* entity_table[ENTITY_TABLE_SIZE][COLLISION_BUFFER_SIZ
     printf("relations have NOT been deleted.\n");
   #endif
 
-  for (int h=0; h<number_of_relations; h++)
+  for (int h=0; h<rr; h++)
   {
       relation = relations_buffer[h];
       rel_num = relation->sub_relation_number;
@@ -825,6 +850,7 @@ int report_function(Entity* entity_table[ENTITY_TABLE_SIZE][COLLISION_BUFFER_SIZ
             printf("relation %s is unused, deleting(LATE)\n", relation->name);
           #endif
           delete_unused_relation(relations_buffer, relation, h);
+          rr--;
           h --;
         }
     }
@@ -888,32 +914,6 @@ void deb_print_relations(Entity* entity_table[ENTITY_TABLE_SIZE][COLLISION_BUFFE
 #endif
 
 //------------------------------------------------------------------------------
-
-int generate_opcode(LongString input_string)
-{
-  if (input_string[0] == 'a') //addent or addrel
-  {
-    if (input_string[3] == 'e') //addent
-      return 0;
-    else //addrel
-      return 1;
-  }
-  else if (input_string[0] == 'd') //delent or delrel
-  {
-    if (input_string[3] == 'e') //delent
-      return 2;
-    else //delrel
-      return 3;
-  }
-  else if (input_string[0] == 'r') //report
-    return 4;
-
-  return 5; //end
-}
-//check the first 6 characters of the input string and generate
-//the correct opcode.
-
-//------------------------------------------------------------------------------
 int main() //main program
 {
   //main data structures
@@ -936,13 +936,31 @@ int main() //main program
   while (1)
   {
     fgets(input_string, 160, stdin);
-    opcode = generate_opcode(input_string);
+
+    if (input_string[0] == 'a') //addent or addrel
+    {
+      if (input_string[3] == 'e') //addent
+        opcode = 0;
+      else //addrel
+        opcode = 1;
+    }
+    else if (input_string[0] == 'd') //delent or delrel
+    {
+      if (input_string[3] == 'e') //delent
+        opcode = 2;
+      else //delrel
+        opcode = 3;
+    }
+    else if (input_string[0] == 'r') //report
+      opcode = 4;
+    else
+      opcode = 5;
 
     if (opcode != 4)
     {
       if (prev_opcode == opcode)
       {
-        if (strcmp(prev_command, input_string) == 0)
+        if (strcmp(prev_command+8, input_string+8) == 0)
           opcode = 6;
         else
         {
