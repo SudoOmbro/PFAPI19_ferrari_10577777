@@ -2,6 +2,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+/*
+  TODO:
+  - cambia le sotto relazioni in 2 array che contengono src e dest.
+  - metti a posto il report in modo che funzioni e faccia meno accessi.
+  (- pulisci il deleted_entities_array.)
+*/
+
 #define ENTITY_TABLE_SIZE  6451 //6451
 #define SUB_RELATIONS_ARRAY_SIZE 98304 //78024
 #define RELATIONS_BUFFER_SIZE 4096
@@ -391,16 +398,11 @@ void entity_array_fixup_delete(Entity* array[COLLISION_BUFFER_SIZE], int start)
 int handle_entity_creation(Entity* entity_table[][COLLISION_BUFFER_SIZE], String name)
 {
   //do the hash function but also save the value of the entity
-  static unsigned long prev_value = 0;
   unsigned long value = 0;
   for (int i=1; name[i] != '"'; i++)
   {
     value = 131*value + name[i];
   }
-
-  if (value == prev_value)
-    return 0;
-  prev_value = value;
 
   #ifdef deb
     printf("entity value: %lu\n", value);
@@ -411,7 +413,14 @@ int handle_entity_creation(Entity* entity_table[][COLLISION_BUFFER_SIZE], String
     int i;
     for(i=0; entity_table[pos][i] != NULL; i++)
     {
-      if (entity_table[pos][i]->value > value)
+      if (value == entity_table[pos][i]->value)
+      {
+        #ifdef deb
+          printf("Entity already exists\n");
+        #endif
+        return 0;
+      }
+      else if (strcmp(entity_table[pos][i]->name, name) < 0)
       {
         Entity* entity = create_entity(name, value);
         #ifdef deb
@@ -419,13 +428,6 @@ int handle_entity_creation(Entity* entity_table[][COLLISION_BUFFER_SIZE], String
         #endif
         entity_array_fixup(entity_table[pos], i, entity);
         return 1;
-      }
-      else if (value == entity_table[pos][i]->value)
-      {
-        #ifdef deb
-          printf("Entity already exists\n");
-        #endif
-        return 0;
       }
     }
 
@@ -509,12 +511,7 @@ int handle_relation_creation(Entity* entity_table[ENTITY_TABLE_SIZE][COLLISION_B
 
 Entity* delent_function(Entity* entity_table[ENTITY_TABLE_SIZE][COLLISION_BUFFER_SIZE], String name)
 {
-  static unsigned long prev_value = 0;
   unsigned long value = entity_hash_function(name);
-
-  if (value == prev_value)
-    return 0;
-  prev_value = value;
 
   int pos = value % ENTITY_TABLE_SIZE;
   int entity_pos = entity_hash_table_linear_search_pos(entity_table[pos], value);
@@ -680,7 +677,7 @@ int report_function(Entity* entity_table[ENTITY_TABLE_SIZE][COLLISION_BUFFER_SIZ
   if (del_num > 0) {
 
   #ifdef deb
-    printf("relations have been deleted.\n");
+    printf("entities have been deleted.\n");
   #endif
 
   for (int h=0; h<rr; h++)
@@ -698,6 +695,9 @@ int report_function(Entity* entity_table[ENTITY_TABLE_SIZE][COLLISION_BUFFER_SIZ
         temp_counter = maximum = 0;
         for (k=0; k<rel_num; k++)
         {
+          #ifdef deb
+            printf("%d\n", k);
+          #endif
           sub_rel = array[k];
           temp_entity = sub_rel->destination;
           if (prev_entity == temp_entity)
@@ -777,7 +777,7 @@ int report_function(Entity* entity_table[ENTITY_TABLE_SIZE][COLLISION_BUFFER_SIZ
 } else {
 
   #ifdef deb
-    printf("relations have NOT been deleted.\n");
+    printf("entities have NOT been deleted.\n");
   #endif
 
   for (int h=0; h<rr; h++)
@@ -942,6 +942,8 @@ int main() //main program
   String argument1;
   String argument2;
   LongString input_string;
+  int prev_opcode = 5;
+  String prev_arg = "";
   int report_needed = 1; // 0 = report has not changed, 1 = report has changed.
   #ifdef deb
     int command_counter = 0;
@@ -953,7 +955,7 @@ int main() //main program
     fgets(input_string, 160, stdin);
 
     #ifdef deb
-      printf("\nCOMMAND %d: %s\n", command_counter, input_string);
+      printf("\nCOMMAND %d: %sPREVIOUS ARG: %s\nPREVIOUS OPCODE: %d\n\n", command_counter, input_string, prev_arg, prev_opcode);
       command_counter ++;
     #endif
 
@@ -962,7 +964,19 @@ int main() //main program
       if (input_string[3] == 'e') //addent
       {
         get_argument(input_string, argument0, 8);
-        handle_entity_creation(entity_table, argument0);
+        if (prev_opcode != 0)
+        {
+          handle_entity_creation(entity_table, argument0);
+          prev_opcode = 0;
+        }
+        else
+        {
+          if (strcmp(prev_arg, argument0) != 0)
+          {
+            handle_entity_creation(entity_table, argument0);
+          }
+        }
+        memcpy(prev_arg, argument0, sizeof(String));
         #ifdef deb
           deb_print_entities(entity_table);
           deb_print_relations(entity_table, relations_buffer);
@@ -974,7 +988,10 @@ int main() //main program
         opcode = get_argument(input_string, argument1, opcode+3);
         get_argument(input_string, argument2, opcode+3);
         if (handle_relation_creation(entity_table, relations_buffer,  argument0, argument1, argument2) != 0)
+        {
           report_needed = 1;
+          prev_opcode = 1;
+        }
         #ifdef deb
           //deb_print_entities(entity_table);
           deb_print_relations(entity_table, relations_buffer);
@@ -986,13 +1003,31 @@ int main() //main program
       if (input_string[3] == 'e') //delent
       {
         get_argument(input_string, argument0, 8);
-        Entity* ent = delent_function(entity_table, argument0);
-        if (ent != 0)
+        if (prev_opcode != 2)
         {
-          deleted_entities_array[del_ent_num] = ent;
-          del_ent_num ++;
-          report_needed = 1;
+          Entity* ent = delent_function(entity_table, argument0);
+          if (ent != 0)
+          {
+            deleted_entities_array[del_ent_num] = ent;
+            del_ent_num ++;
+            report_needed = 1;
+          }
+          prev_opcode = 2;
         }
+        else
+        {
+          if (strcmp(prev_arg, argument0) != 0)
+          {
+            Entity* ent = delent_function(entity_table, argument0);
+            if (ent != 0)
+            {
+              deleted_entities_array[del_ent_num] = ent;
+              del_ent_num ++;
+              report_needed = 1;
+            }
+          }
+        }
+        memcpy(prev_arg, argument0, sizeof(String));
         #ifdef deb
           deb_print_entities(entity_table);
           deb_print_relations(entity_table, relations_buffer);
@@ -1004,7 +1039,10 @@ int main() //main program
         opcode = get_argument(input_string, argument1, opcode+3);
         get_argument(input_string, argument2, opcode+3);
         if (delrel_function(entity_table, relations_buffer, argument0, argument1, argument2) != 0)
+        {
           report_needed = 1;
+          prev_opcode = 3;
+        }
         #ifdef deb
           //deb_print_entities(entity_table);
           deb_print_relations(entity_table, relations_buffer);
@@ -1013,11 +1051,9 @@ int main() //main program
     }
     else if (input_string[0] == 'r') //report
     {
-      if (report_function(entity_table, relations_buffer, report_needed, deleted_entities_array, del_ent_num) != 0)
-      {
-        del_ent_num = 0;
-        report_needed = 0;
-      }
+      report_function(entity_table, relations_buffer, report_needed, deleted_entities_array, del_ent_num);
+      del_ent_num = 0;
+      report_needed = 0;
       #ifdef deb
         //deb_print_entities(entity_table);
         deb_print_relations(entity_table, relations_buffer);
