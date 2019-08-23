@@ -2,17 +2,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-/*
-TODO:
-(- pulisci buffer di eliminazione dopo il report.)
-- ottimizza report con check_entity_validity
-*/
-
 #define ENTITY_TABLE_SIZE  6451 //6451
 #define SUB_RELATIONS_ARRAY_SIZE 98304 //78024
 #define RELATIONS_BUFFER_SIZE 4096
 #define COLLISION_BUFFER_SIZE 21 //32
-#define BUFF_ALLOC 76
 
 /* add -Ddeb to gcc compiler options to compile in verbose debug mode */
 
@@ -397,7 +390,7 @@ void entity_array_fixup_delete(Entity* array[COLLISION_BUFFER_SIZE], int start)
 
 int handle_entity_creation(Entity* entity_table[][COLLISION_BUFFER_SIZE], String name)
 {
-  //do the hash functio but also save the value of the entity
+  //do the hash function but also save the value of the entity
   static unsigned long prev_value = 0;
   unsigned long value = 0;
   for (int i=1; name[i] != '"'; i++)
@@ -701,107 +694,87 @@ int report_function(Entity* entity_table[ENTITY_TABLE_SIZE][COLLISION_BUFFER_SIZ
         #endif
         array = (SubRelation**) relation->sub_rel_array;
         prev_rel = array[0];
-        prev_entity = prev_rel->destination;
+        prev_entity = 0;
         temp_counter = maximum = 0;
         for (k=0; k<rel_num; k++)
         {
           sub_rel = array[k];
-          if (check_sub_rel_validity(sub_rel, del_array, del_num) == 1)
+          temp_entity = sub_rel->destination;
+          if (prev_entity == temp_entity)
           {
-            temp_entity = sub_rel->destination;
-            #ifdef deb
-              printf("prev: %s, current: %s\n", prev_entity->name, temp_entity->name);
-            #endif
-            if (temp_entity == prev_entity)
+            if (check_entity_validity(sub_rel->source, del_array, del_num) == 1)
             {
               #ifdef deb
-                printf("increasing temp_counter\n");
+                printf("prev: %s, current: %s\n", prev_entity->name, temp_entity->name);
               #endif
               temp_counter ++;
             }
             else
             {
-                if (temp_counter > maximum)
-                {
-                  maximum = temp_counter;
-                  strcpy(entities_string, prev_rel->dest_name);
-                  strcat(entities_string, " ");
-                }
-                else if (temp_counter == maximum)
-                {
-                  strcat(entities_string, prev_rel->dest_name);
-                  strcat(entities_string, " ");
-                }
-                #ifdef deb
-                  printf("%d: %s, %d;\n", i, prev_entity->name, temp_counter);
-                #endif
-                prev_entity = temp_entity;
-                prev_rel = sub_rel;
-                temp_counter = 1;
-                #ifdef deb
-                  printf("found a new entity, %s\n", temp_entity->name);
-                #endif
+              free(array[k]);
+              relation->sub_relation_number --;
+              rel_num --;
+              sub_rel_array_fixup_delete(array, k, rel_num);
+              k--;
+              #ifdef deb
+                printf("deleted relation at position %d\n", k);
+              #endif
             }
           }
           else
           {
-            free(array[k]);
-            relation->sub_relation_number --;
-            rel_num --;
-            sub_rel_array_fixup_delete(array, k, rel_num);
-            k--;
-            #ifdef deb
-              printf("deleted relation at position %d\n", k);
-            #endif
-          }
-        }
+            if (temp_counter > maximum)
+            {
+              maximum = temp_counter;
+              strcpy(entities_string, prev_rel->dest_name);
+              strcat(entities_string, " ");
+            }
+            else if (temp_counter == maximum)
+            {
+              strcat(entities_string, prev_rel->dest_name);
+              strcat(entities_string, " ");
+            }
 
-        if (temp_counter > maximum)
-        {
-          maximum = temp_counter;
-          strcpy(entities_string, prev_rel->dest_name);
-          strcat(entities_string, " ");
+            if (check_entity_validity(sub_rel->destination, del_array, del_num) == 1)
+            {
+              #ifdef deb
+                printf("%d: %s, %d;\n", i, prev_entity->name, temp_counter);
+              #endif
+              prev_entity = temp_entity;
+              prev_rel = sub_rel;
+              temp_counter = 1;
+              #ifdef deb
+                printf("found a new entity, %s\n", temp_entity->name);
+              #endif
+            }
+            else
+            {
+              free(array[k]);
+              relation->sub_relation_number --;
+              rel_num --;
+              sub_rel_array_fixup_delete(array, k, rel_num);
+              k--;
+              #ifdef deb
+                printf("deleted relation at position %d\n", k);
+              #endif
+              prev_rel = 0;
+              prev_entity = 0;
+            }
         }
-        else if (temp_counter != 0 && temp_counter == maximum)
-        {
-          strcat(entities_string, prev_rel->dest_name);
-          strcat(entities_string, " ");
-        }
-
-        if (maximum > 0)
-        {
-          strcat(report_string, relation->name);
-          strcat(report_string, " ");
-          strcat(report_string, entities_string);
-          sprintf(tmp, "%d; ", maximum);
-          strcat(report_string, tmp);
-          i ++;
-          #ifdef deb
-            printf("maximum is > 0, added relation to report array.\n");
-          #endif
-        }
-        else
-        {
-        #ifdef deb
-          printf("relation %s is unused, deleting (LATE)\n", relation->name);
-        #endif
-          delete_unused_relation(relations_buffer, relation, h);
-          rr --;
-          h --;
-        }
-    }
-    else
-    {
-    #ifdef deb
-      printf("relation %s is unused, deleting\n", relation->name);
-    #endif
-      delete_unused_relation(relations_buffer, relation, h);
-      rr --;
-      h --;
     }
   }
+  else
+  {
+  #ifdef deb
+    printf("relation %s is unused, deleting\n", relation->name);
+  #endif
+    delete_unused_relation(relations_buffer, relation, h);
+    rr --;
+    h --;
+  }
+}
 
-  } else {
+} else {
 
   #ifdef deb
     printf("relations have NOT been deleted.\n");
@@ -913,15 +886,18 @@ int report_function(Entity* entity_table[ENTITY_TABLE_SIZE][COLLISION_BUFFER_SIZ
 void deb_print_entities(Entity* entity_table[ENTITY_TABLE_SIZE][COLLISION_BUFFER_SIZE])
 {
   Entity* entity;
-  for (int i=0; entity_table[0][i] != NULL; i++)
+  for (int j=0; j<ENTITY_TABLE_SIZE; j++)
   {
-       entity = entity_table[0][i];
-        if (entity->value != 1)
-          printf("%s, ", entity->name);
-        else
-          printf("(deallocated),");
+    if (entity_table[j][0] != NULL)
+    {
+      for (int i=0; entity_table[j][i] != NULL; i++)
+      {
+        entity = entity_table[j][i];
+        printf("%s, ", entity->name);
+      }
+      printf("\n");
+    }
   }
-  printf("\n");
 }
 
 void deb_print_sub_relations(Entity* entity_table[ENTITY_TABLE_SIZE][COLLISION_BUFFER_SIZE], Relation* rel)
@@ -976,33 +952,14 @@ int main() //main program
   {
     fgets(input_string, 160, stdin);
 
-    if (input_string[0] == 'a') //addent or addrel
-    {
-      if (input_string[3] == 'e') //addent
-        opcode = 0;
-      else //addrel
-        opcode = 1;
-    }
-    else if (input_string[0] == 'd') //delent or delrel
-    {
-      if (input_string[3] == 'e') //delent
-        opcode = 2;
-      else //delrel
-        opcode = 3;
-    }
-    else if (input_string[0] == 'r') //report
-      opcode = 4;
-    else
-      opcode = 5;
-
     #ifdef deb
       printf("\nCOMMAND %d: %s\n", command_counter, input_string);
       command_counter ++;
     #endif
 
-    switch (opcode)
+    if (input_string[0] == 'a') //addent or addrel
     {
-      case 0: //addent
+      if (input_string[3] == 'e') //addent
       {
         get_argument(input_string, argument0, 8);
         handle_entity_creation(entity_table, argument0);
@@ -1010,9 +967,8 @@ int main() //main program
           deb_print_entities(entity_table);
           deb_print_relations(entity_table, relations_buffer);
         #endif
-        break;
       }
-      case 1: //addrel
+      else //addrel
       {
         opcode = get_argument(input_string, argument0, 8);
         opcode = get_argument(input_string, argument1, opcode+3);
@@ -1023,9 +979,11 @@ int main() //main program
           //deb_print_entities(entity_table);
           deb_print_relations(entity_table, relations_buffer);
         #endif
-        break;
       }
-      case 2: //delent
+    }
+    else if (input_string[0] == 'd') //delent or delrel
+    {
+      if (input_string[3] == 'e') //delent
       {
         get_argument(input_string, argument0, 8);
         Entity* ent = delent_function(entity_table, argument0);
@@ -1036,12 +994,11 @@ int main() //main program
           report_needed = 1;
         }
         #ifdef deb
-          //deb_print_entities(entity_table);
+          deb_print_entities(entity_table);
           deb_print_relations(entity_table, relations_buffer);
         #endif
-        break;
       }
-      case 3: //delrel
+      else //delrel
       {
         opcode = get_argument(input_string, argument0, 8);
         opcode = get_argument(input_string, argument1, opcode+3);
@@ -1052,33 +1009,26 @@ int main() //main program
           //deb_print_entities(entity_table);
           deb_print_relations(entity_table, relations_buffer);
         #endif
-        break;
       }
-      case 4: //report
+    }
+    else if (input_string[0] == 'r') //report
+    {
+      if (report_function(entity_table, relations_buffer, report_needed, deleted_entities_array, del_ent_num) != 0)
       {
-        if (report_function(entity_table, relations_buffer, report_needed, deleted_entities_array, del_ent_num) != 0)
-        {
-          del_ent_num = 0;
-          report_needed = 0;
-        }
-        #ifdef deb
-          //deb_print_entities(entity_table);
-          deb_print_relations(entity_table, relations_buffer);
-        #endif
-        break;
+        del_ent_num = 0;
+        report_needed = 0;
       }
-      case 5: //end
-      {
-        return 0;
-        break;
-      }
-      case 6:
-      {
-        #ifdef deb
-          printf("same command\n");
-        #endif
-        break;
-      }
+      #ifdef deb
+        //deb_print_entities(entity_table);
+        deb_print_relations(entity_table, relations_buffer);
+      #endif
+    }
+    else
+    {
+      #ifdef deb
+        printf("execution ended correctly.\n");
+      #endif
+      return 0;
     }
   }
 }
