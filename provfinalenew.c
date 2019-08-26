@@ -870,12 +870,15 @@ int report_function(Entity* entity_table[ENTITY_TABLE_SIZE][COLLISION_BUFFER_SIZ
 
   }
   #ifdef deb
-    printf("finished phase one, printing...\n");
+    printf("finished phase one, printing...\n\n");
   #endif
 
   }
 
   printf("%s\n", report_string);
+  #ifdef deb
+    printf("\n");
+  #endif
   return 1;
 }
 
