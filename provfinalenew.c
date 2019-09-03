@@ -1,18 +1,20 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 /*
-  IDEAS:
-  - save only the sub relations positions, not the pointers.
-  - redo the "deleted entities" part of the report.
+  TODO:
+  - hashing perfetto: rimuovi buffer collisioni.
+  - redo the "deleted entities" part of the report. Guarda se tutte le entità
+    nella relazione sono valide prima di fare effettivamente il report.
   (- clean the deleted_entities_array.)(not necessary).
 */
 
-#define ENTITY_TABLE_SIZE  5929 //6451
+#define ENTITY_TABLE_SIZE  19571 //6451
 #define SUB_RELATIONS_ARRAY_SIZE 98304 //78024
 #define RELATIONS_BUFFER_SIZE 4096
-#define COLLISION_BUFFER_SIZE 4096 //32
+#define COLLISION_BUFFER_SIZE 16 //64
 
 /* add -Ddeb to gcc compiler options to compile in verbose debug mode */
 
@@ -33,7 +35,6 @@ typedef struct {
   int sub_relation_number;
   Entity* src_array[SUB_RELATIONS_ARRAY_SIZE]; //contains sources
   Entity* dest_array[SUB_RELATIONS_ARRAY_SIZE]; //contains destinations
-  int dest_pos_buffer[SUB_RELATIONS_ARRAY_SIZE]; //contains dest positions
 } Relation;
 
 int number_of_relations = 0;
@@ -41,18 +42,21 @@ int number_of_relations = 0;
 //------------------------------------------------------------------------------
 //functions definitions---------------------------------------------------------
 
-int entity_get_table_pos(char* name)
+unsigned long entity_get_hash(char* name)
 {
+  unsigned long hash = 0;
+  for (int i=1; name[i]!='"'; i++)
+            hash = name[i] + (hash << 6) + (hash << 16) - hash;
   #ifdef deb
-    printf("entity position: %d\n", ((name[1]-45)*77)+(name[2]-45) );
+    printf("entity hash: %d\n", );
   #endif
-  return ((name[1]-45)*77)+(name[2]-45);
+  return hash;
 }
 
 unsigned long entity_get_value(char* text, int table_pos)
 {
-  unsigned long value = table_pos;
-  for (int i=3; text[i] != '"'; i++)
+  unsigned long value = 0;
+  for (int i=1; text[i] != '"'; i++)
   {
     value = 131*value + text[i];
   }
@@ -102,7 +106,7 @@ Entity* entity_hash_table_linear_search(Entity* array[COLLISION_BUFFER_SIZE],
 //looks for entity in a specified collision buffer, returns the entity pointer.
 
 int entity_hash_table_linear_search_pos(Entity* array[COLLISION_BUFFER_SIZE],
-  unsigned long value)
+unsigned long value)
 {
   #ifdef deb
     printf("starting linear search\n");
@@ -123,6 +127,29 @@ int entity_hash_table_linear_search_pos(Entity* array[COLLISION_BUFFER_SIZE],
   return -1;
 }
 //looks for entity in a specified collision buffer, returns postition in buffer.
+
+int entity_hash_table_linear_search_optimized(Entity* array[COLLISION_BUFFER_SIZE],
+Entity* entity)
+{
+  #ifdef deb
+    printf("starting linear search\n");
+  #endif
+  for(int i=0; array[i] != NULL; i++)
+  {
+    if (entity == array[i])
+    {
+      #ifdef deb
+        printf("linear search done, found entity\n");
+      #endif
+      return i;
+    }
+  }
+  #ifdef deb
+    printf("linear search done, no result\n");
+  #endif
+  return -1;
+}
+//looks for entity pointer in a specified collision buffer, returns postition in buffer.
 
 Entity* get_entity(Entity** entity_table, String name)
 {
@@ -152,8 +179,19 @@ int get_entity_pos(Entity** entity_table, String name)
 //check the hash table and see if the entity already exists,
 //return 0 if it does not, else return entity.
 
+int get_entity_pos_optimized(Entity** entity_table, int position, Entity* entity)
+{
+  #ifdef deb
+    printf("getting entity %s.\n", entity->name);
+  #endif
+  int pos = floor(position / COLLISION_BUFFER_SIZE);
+  return entity_hash_table_linear_search_optimized(&entity_table[pos], entity)+pos;
+}
+//check the hash table and see if the entity already exists,
+//return 0 if it does not, else return entity.
+
 int relations_binary_search(Relation* relations_buffer[RELATIONS_BUFFER_SIZE],
-  String name, int l, int r)
+String name, int l, int r)
 {
   while (r >= l)
   {
@@ -181,7 +219,7 @@ int relations_binary_search(Relation* relations_buffer[RELATIONS_BUFFER_SIZE],
 }
 
 int sub_relations_binary_search(Entity** dest_array, Entity** src_array,
-  Entity* dest, int l, int r, Entity* src, int* dest_pos_buffer, int dest_pos)
+Entity* dest, int l, int r, Entity* src)
 {
   while (r >= l)
   {
@@ -209,7 +247,7 @@ int sub_relations_binary_search(Entity** dest_array, Entity** src_array,
           #ifdef deb
             printf("nope.\n");
           #endif
-          if (dest_pos_buffer[mid] > dest_pos)
+          if (strcmp(dest_array[mid]->name, dest->name) > 0)
             r = mid - 1;
           else
             l = mid + 1;
@@ -222,8 +260,7 @@ int sub_relations_binary_search(Entity** dest_array, Entity** src_array,
 }
 
 int sub_relations_binary_search_creation(Entity** dest_array,
-  Entity** src_array, Entity* dest, int l, int r, Entity* src,
-  int* dest_pos_buffer, int dest_pos)
+Entity** src_array, Entity* dest, int l, int r, Entity* src)
 {
   while (r >= l)
   {
@@ -246,17 +283,17 @@ int sub_relations_binary_search_creation(Entity** dest_array,
             else
               r = mid - 1;
         }
-        else if (dest_pos_buffer[mid] > dest_pos)
+        else if (strcmp(dest_array[mid]->name, dest->name) > 0)
         {
             #ifdef deb
-              printf("(%d) %s < (%d) %s\n", dest_pos, dest->name, dest_pos_buffer[mid], (dest_array[mid]->name));
+              printf("%s < %s\n", dest->name, dest_array[mid]->name);
             #endif
             r = mid - 1;
         }
         else
         {
           #ifdef deb
-            printf("(%d) %s > (%d) %s\n", dest_pos, dest->name, dest_pos_buffer[mid], (dest_array[mid]->name));
+            printf("%s > %s\n", dest->name, dest_array[mid]->name);
           #endif
           l = mid + 1;
         }
@@ -350,7 +387,6 @@ void rel_buffer_fixup_delete(Relation* relations_buffer[RELATIONS_BUFFER_SIZE], 
   int rel_num = number_of_relations;
   for (i=start_pos; i<rel_num; i++)
     relations_buffer[i] = relations_buffer[i+1];
-  relations_buffer[i] = NULL;
 }
 
 Relation* create_relation(String name)
@@ -370,7 +406,6 @@ int relation_add_entities(Relation* rel, Entity* src, Entity* dest, int dest_pos
   int rel_num = rel->sub_relation_number;
   Entity** dest_array = rel->dest_array;
   Entity** src_array = rel->src_array;
-  int* dest_pos_buffer = rel->dest_pos_buffer;
 
   if (rel_num == 0)
   {
@@ -379,13 +414,12 @@ int relation_add_entities(Relation* rel, Entity* src, Entity* dest, int dest_pos
     #endif
     dest_array[0] = dest;
     src_array[0] = src;
-    dest_pos_buffer[0] = dest_pos;
     rel->sub_relation_number ++;
     return 1;
   }
   else
   {
-    int mid_val = sub_relations_binary_search_creation(dest_array, src_array, dest, 0, rel_num-1, src, dest_pos_buffer, dest_pos);
+    int mid_val = sub_relations_binary_search_creation(dest_array, src_array, dest, 0, rel_num-1, src);
     if (mid_val > -1)
     {
       #ifdef deb
@@ -394,7 +428,6 @@ int relation_add_entities(Relation* rel, Entity* src, Entity* dest, int dest_pos
       rel_num ++;
       sub_rel_array_fixup(dest_array, mid_val, rel_num, dest);
       sub_rel_array_fixup(src_array, mid_val, rel_num, src);
-      sub_rel_pos_array_fixup(dest_pos_buffer, mid_val, rel_num, dest_pos);
       rel->sub_relation_number = rel_num;
       #ifdef deb
         printf("added sub relation in %d\n", mid_val);
@@ -407,20 +440,7 @@ int relation_add_entities(Relation* rel, Entity* src, Entity* dest, int dest_pos
 //adds entities to the new/existing relation;
 //return 0 if everything went okay, else 1.
 
-void entity_array_fixup(Entity* array[COLLISION_BUFFER_SIZE], int start, Entity* replacer)
-{
-  int i;
-  Entity* temp;
-  for (i=start; array[i] != NULL; i++)
-  {
-    temp = array[i];
-    array[i] = replacer;
-    replacer = temp;
-  }
-  array[i] = replacer;
-}
-
-void entity_array_fixup_delete(Entity* array[COLLISION_BUFFER_SIZE], int start)
+void entity_array_fixup_delete(Entity** array, int start)
 {
   int i;
   for (i=start; array[i+1] != NULL; i++)
@@ -431,7 +451,7 @@ void entity_array_fixup_delete(Entity* array[COLLISION_BUFFER_SIZE], int start)
 int handle_entity_creation(Entity** entity_table, String name)
 {
   //do the hash function but also save the value of the entity
-  int pos = entity_get_table_pos(name);
+  int pos = entity_get_hash(name);
   unsigned long value = entity_get_value(name, pos);
 
   #ifdef deb
@@ -447,15 +467,6 @@ int handle_entity_creation(Entity** entity_table, String name)
           printf("Entity already exists\n");
         #endif
         return 0;
-      }
-      else if (strcmp(entity_table[pos+i]->name, name) > 0)
-      {
-        Entity* entity = create_entity(name, value);
-        #ifdef deb
-          printf("Created new entity\n");
-        #endif
-        entity_array_fixup(&entity_table[pos], i, entity);
-        return 1;
       }
     }
 
@@ -625,9 +636,8 @@ int delrel_function(Entity** entity_table, Relation* relations_buffer[RELATIONS_
   #endif
   Entity** dest_array = rel->dest_array;
   Entity** src_array = rel->src_array;
-  int* dest_pos_buffer = rel->dest_pos_buffer;
 
-  i = sub_relations_binary_search(dest_array, src_array, dest, 0, rel->sub_relation_number-1, src, dest_pos_buffer, dest_pos);
+  i = sub_relations_binary_search(dest_array, src_array, dest, 0, rel->sub_relation_number-1, src);
   if (i > -1)
   {
       rel->sub_relation_number --;
@@ -636,7 +646,6 @@ int delrel_function(Entity** entity_table, Relation* relations_buffer[RELATIONS_
       dest->rel_num --;
       sub_rel_array_fixup_delete(dest_array, i, rr);
       sub_rel_array_fixup_delete(src_array, i, rr);
-      sub_rel_pos_array_fixup_delete(dest_pos_buffer, i, rr);
       #ifdef deb
         printf("deleted relation at i = %d\n", i);
       #endif
@@ -710,7 +719,6 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
 
           dest_array = relation->dest_array;
           src_array = relation->src_array;
-          int* dest_pos_buffer = relation->dest_pos_buffer;
 
           prev_entity = dest_array[0];
           temp_counter = maximum = 0;
@@ -741,7 +749,6 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
                 rel_num --;
                 sub_rel_array_fixup_delete(dest_array, k, rel_num);
                 sub_rel_array_fixup_delete(src_array, k, rel_num);
-                sub_rel_pos_array_fixup_delete(dest_pos_buffer, k, rel_num);
                 k--;
                 #ifdef deb
                   printf("deleted relation at position %d\n", k+1);
@@ -794,7 +801,6 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
                   rel_num --;
                   sub_rel_array_fixup_delete(dest_array, k, rel_num);
                   sub_rel_array_fixup_delete(src_array, k, rel_num);
-                  sub_rel_pos_array_fixup_delete(dest_pos_buffer, k, rel_num);
                   k--;
                   #ifdef deb
                     printf("deleted relation at position %d\n", k+1);
@@ -811,7 +817,6 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
                 rel_num --;
                 sub_rel_array_fixup_delete(dest_array, k, rel_num);
                 sub_rel_array_fixup_delete(src_array, k, rel_num);
-                sub_rel_pos_array_fixup_delete(dest_pos_buffer, k, rel_num);
                 k--;
                 #ifdef deb
                   printf("deleted relation at position %d\n", k+1);
@@ -1006,15 +1011,14 @@ void deb_print_entities(Entity** entity_table)
   Entity* entity;
   for (int j=0; j<ENTITY_TABLE_SIZE; j++)
   {
-    if (entity_table[j] != NULL)
-    {
-      for (int i=0; entity_table[j+i] != NULL; i++)
+      for (int i=0; entity_table[j*COLLISION_BUFFER_SIZE+i] != NULL; i++)
       {
-        entity = entity_table[j+i];
-        printf("(%d) %s, ", j+i, entity->name);
+        entity = entity_table[j*COLLISION_BUFFER_SIZE+i];
+        printf("(%d) %s, ", j*COLLISION_BUFFER_SIZE+i, entity->name);
       }
-      printf("\n");
-    }
+
+      if (entity_table[j*COLLISION_BUFFER_SIZE] != NULL)
+        printf("\n");
   }
 }
 
@@ -1024,8 +1028,9 @@ void deb_print_sub_relations(Relation* rel)
   int rel_num = rel->sub_relation_number;
   Entity** dest_array = rel->dest_array;
   Entity** src_array = rel->src_array;
+  printf("%s:\n", rel->name);
   for(i=0; i<rel_num; i++)
-    printf("%d: %s --%s--> %s\n", i, src_array[i]->name, rel->name, dest_array[i]->name);
+    printf("%d: %s --> %s\n", i, src_array[i]->name, dest_array[i]->name);
 }
 
 void deb_print_relations(Relation* relations_buffer[RELATIONS_BUFFER_SIZE])
