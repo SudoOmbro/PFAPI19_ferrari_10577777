@@ -56,6 +56,7 @@ unsigned long entity_get_hash(char* name)
 
   return hash;
 }
+//SDBM hashing algorithm
 
 int get_argument(LongString input_string, char* dest_string, int start_pos)
 {
@@ -241,6 +242,8 @@ Entity* dest, int l, int r, Entity* src, char* dest_name)
   #endif
   return -1;
 }
+//looks for a sub relation, return it's position if it exists,
+//else return -1
 
 int sub_relations_binary_search_creation(Entity** dest_array,
 Entity** src_array, Entity* dest, int l, int r, Entity* src, char* dest_name)
@@ -286,6 +289,8 @@ Entity** src_array, Entity* dest, int l, int r, Entity* src, char* dest_name)
   #endif
   return l;
 }
+//looks for a sub relation, if it does not exist, return the position in which
+//to create the new relation, else return -1
 
 Relation* get_relation(Relation* relations_buffer[RELATIONS_BUFFER_SIZE], String name)
 {
@@ -303,6 +308,7 @@ Relation* get_relation(Relation* relations_buffer[RELATIONS_BUFFER_SIZE], String
   else
     return 0;
 }
+//returns the pointer to the wanted relation if it exists, else returns 0
 
 Entity* create_entity(String name, unsigned long value)
 {
@@ -314,7 +320,7 @@ Entity* create_entity(String name, unsigned long value)
   self->rel_num = 0;
   return self;
 }
-//crea entità, assegna il nome e ritorna il puntatore.
+//create entity, return the pointer to the created entity.
 
 void sub_rel_array_fixup(Entity** array, int start_pos, const int max, Entity* replacer)
 {
@@ -371,6 +377,7 @@ void rel_buffer_fixup_delete(Relation* relations_buffer[RELATIONS_BUFFER_SIZE], 
   for (i=start_pos; i<rel_num; i++)
     relations_buffer[i] = relations_buffer[i+1];
 }
+//fixup the relation buffer after deleting a relation.
 
 Relation* create_relation(String name)
 {
@@ -430,6 +437,7 @@ void entity_array_fixup_delete(Entity** array, int start)
     array[i] = array[i+1];
   array[i] = NULL;
 }
+//fixup the entity array after deleting one.
 
 int handle_entity_creation(Entity** entity_table, String name)
 {
@@ -569,6 +577,7 @@ void delete_unused_relation(Relation* relations_buffer[RELATIONS_BUFFER_SIZE], R
   rel_buffer_fixup_delete(relations_buffer, start_pos);
   free(rel);
 }
+//deletes a relation with no sub relations.
 
 int delrel_function(Entity** entity_table, Relation* relations_buffer[RELATIONS_BUFFER_SIZE], String name_source, String name_dest, String rel_name)
 {
@@ -656,6 +665,7 @@ int check_entity_validity(Entity* entity, Entity** array, int del_num)
   }
   return 1;
 }
+//checks if the given entity hasn't been deleted.
 
 int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int update, Entity** del_array, int del_num)
 {
@@ -995,6 +1005,7 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
 
   return 0;
 }
+//does the report.
 
 //debug functions---------------------------------------------------------------
 
