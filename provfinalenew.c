@@ -7,6 +7,8 @@
   - salva in un buffer direttamente i puntatori alle stringhe con i nomi
     delle entità destinazione per evitare di accedere alle entità in fase di
     ricerca/stampa di sottorelazioni.
+  - implementa i fixup con memmove.
+  - correggi il report. (batch2.2)
   - integra il report direttamente nel cleanup delle sottorelazioni.
 */
 
@@ -410,6 +412,25 @@ inline __attribute__((always_inline)) void sub_rel_pos_array_fixup(int* array, i
 //end postion and the entity that replaces, this function restores
 //the order in the array.
 
+inline __attribute__((always_inline)) void sub_rel_array_fixup_complete(
+Entity** dest_array, int start_pos, const int max, Entity** src_array,
+char** dest_name_array, Entity* dest_replacer, Entity* src_replacer, char* dest_name_replacer)
+{
+  int i;
+  for (i=max; i>start_pos; i--)
+  {
+    dest_array[i] = dest_array[i-1];
+    src_array[i] = src_array[i-1];
+    dest_name_array[i] = dest_name_array[i-1];
+  }
+  dest_array[i] = dest_replacer;
+  src_array[i] = src_replacer;
+  dest_name_array[i] = dest_name_replacer;
+}
+//given the pointers to the arrays to restore, the starting position, the
+//end postion and the replacers, this function restores
+//the order in the arrays.
+
 inline __attribute__((always_inline)) void rel_buffer_fixup_delete(Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int start_pos)
 {
   int i;
@@ -436,6 +457,7 @@ int relation_add_entities(Relation* rel, Entity* src, Entity* dest, char* dest_n
   int rel_num = rel->sub_relation_number;
   Entity** dest_array = rel->dest_array;
   Entity** src_array = rel->src_array;
+  char** dest_name_array = rel->dest_name_array;
 
   if (rel_num == 0)
   {
@@ -447,6 +469,7 @@ int relation_add_entities(Relation* rel, Entity* src, Entity* dest, char* dest_n
     rel->sub_relation_number ++;
     src->rel_num ++;
     dest->rel_num ++;
+    dest_name_array[0] = dest->name;
     return 1;
   }
   else
@@ -458,11 +481,13 @@ int relation_add_entities(Relation* rel, Entity* src, Entity* dest, char* dest_n
         printf("found a spot\n");
       #endif
       rel_num ++;
-      sub_rel_array_fixup(dest_array, mid_val, rel_num, dest);
-      sub_rel_array_fixup(src_array, mid_val, rel_num, src);
       rel->sub_relation_number = rel_num;
       src->rel_num ++;
       dest->rel_num ++;
+      //sub_rel_array_fixup(dest_array, mid_val, rel_num, dest);
+      //sub_rel_array_fixup(src_array, mid_val, rel_num, src);
+      sub_rel_array_fixup_complete(src_array, mid_val, rel_num, src_array,
+        dest_name_array, dest, src, dest->name);
       #ifdef deb
         printf("added sub relation in %d\n", mid_val);
       #endif
@@ -701,10 +726,8 @@ int delrel_function(Entity** entity_table, Relation* relations_buffer[RELATIONS_
 int check_entity_validity(Entity* entity, Entity** array, int del_num)
 {
   for (int i=0; i<del_num; i++)
-  {
     if (entity == array[i])
       return 0;
-  }
   return 1;
 }
 //checks if the given entity hasn't been deleted.
@@ -775,13 +798,18 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
               {
                 if (check_entity_validity(temp_entity, del_array, del_num))
                 {
+                  #ifdef deb
+                    printf("%s is valid, changing mode to 2\n", temp_entity->name);
+                  #endif
                   mode = 2;
                   prev_entity = temp_entity;
                   temp_start = i;
-                  i++;
                 }
                 else
                 {
+                  #ifdef deb
+                    printf("%s is not valid, changing mode to 1\n", temp_entity->name);
+                  #endif
                   mode = 1;
                   prev_entity = temp_entity;
                   temp_start = i;
@@ -794,6 +822,9 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
                 temp_entity = dest_array[i];
                 if (temp_entity == prev_entity)
                 {
+                  #ifdef deb
+                    printf("deleting %s --> %s\n", src_array[i]->name, dest_array[i]->name);
+                  #endif
                   i ++;
                 }
                 else
@@ -804,6 +835,21 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
                   sub_rel_array_fixup_delete_static( (void**) src_array, temp_start, rel_num, step);
                   mode = 0;
                   i -= step;
+                  if (check_entity_validity(temp_entity, del_array, del_num))
+                  {
+                    #ifdef deb
+                      printf("%s is valid, changing mode to 2\n", temp_entity->name);
+                    #endif
+                    mode = 2;
+                    prev_entity = temp_entity;
+                    temp_start = i;
+                  }
+                  else
+                  {
+                    prev_entity = temp_entity;
+                    temp_start = i;
+                    i ++;
+                  }
                 }
                 break;
               }
@@ -818,6 +864,9 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
                   }
                   else
                   {
+                    #ifdef deb
+                      printf("deleting %s --> %s\n", src_array[i]->name, dest_array[i]->name);
+                    #endif
                     rel_num --;
                     sub_rel_array_fixup_delete( (void**) dest_array, i, rel_num);
                     sub_rel_array_fixup_delete( (void**) src_array, i, rel_num);
@@ -825,7 +874,21 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
                 }
                 else
                 {
-                  mode = 0;
+                  if (check_entity_validity(temp_entity, del_array, del_num))
+                  {
+                    prev_entity = temp_entity;
+                    temp_start = i;
+                  }
+                  else
+                  {
+                    #ifdef deb
+                      printf("%s is not valid, changing mode to 1\n", temp_entity->name);
+                    #endif
+                    mode = 1;
+                    prev_entity = temp_entity;
+                    temp_start = i;
+                    i ++;
+                  }
                 }
                 break;
               }
