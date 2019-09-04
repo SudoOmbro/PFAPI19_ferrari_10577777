@@ -7,10 +7,11 @@
   - salva in un buffer direttamente i puntatori alle stringhe con i nomi
     delle entità destinazione per evitare di accedere alle entità in fase di
     ricerca/stampa di sottorelazioni.
+  - integra il report direttamente nel cleanup delle sottorelazioni.
 */
 
 #define ENTITY_TABLE_SIZE  19571 //6451
-#define SUB_RELATIONS_ARRAY_SIZE 98304 //78024
+#define SUB_RELATIONS_ARRAY_SIZE 81920 //78024, 98304
 #define RELATIONS_BUFFER_SIZE 4096
 #define COLLISION_BUFFER_SIZE 16 //64
 
@@ -33,11 +34,12 @@ typedef struct {
   int sub_relation_number;
   Entity* src_array[SUB_RELATIONS_ARRAY_SIZE]; //contains sources
   Entity* dest_array[SUB_RELATIONS_ARRAY_SIZE]; //contains destinations
+  char* dest_name_array[SUB_RELATIONS_ARRAY_SIZE]; //contains pointers to strings
 } Relation;
 
 int number_of_relations = 0;
 #ifdef deb
-  int collisions = 0;
+  int collisions = 0; //for testing the hash function
 #endif
 
 //------------------------------------------------------------------------------
@@ -310,7 +312,7 @@ Relation* get_relation(Relation* relations_buffer[RELATIONS_BUFFER_SIZE], String
 }
 //returns the pointer to the wanted relation if it exists, else returns 0
 
-Entity* create_entity(String name, unsigned long value)
+inline __attribute__((always_inline)) Entity* create_entity(String name, unsigned long value)
 {
   //create the entity in the hash table
   Entity* self;
@@ -333,7 +335,7 @@ void sub_rel_array_fixup(Entity** array, int start_pos, const int max, Entity* r
 //end postion and the entity that replaces, this function restores
 //the order in the array.
 
-void rel_buffer_fixup(Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int start_pos, Relation* replacer)
+inline __attribute__((always_inline)) void rel_buffer_fixup(Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int start_pos, Relation* replacer)
 {
   int i;
   for (i=number_of_relations; i>start_pos; i--)
@@ -341,7 +343,7 @@ void rel_buffer_fixup(Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int sta
   relations_buffer[i] = replacer;
 }
 
-void sub_rel_array_fixup_delete(Entity** array, const int start_pos, const int end)
+inline __attribute__((always_inline)) void sub_rel_array_fixup_delete(void** array, const int start_pos, const int end)
 {
   int i;
   for (i=start_pos; i<end; i++)
@@ -350,7 +352,35 @@ void sub_rel_array_fixup_delete(Entity** array, const int start_pos, const int e
 //given the pointer to the array to restore, the starting position
 //and the end postion, this function restores the order in the array.
 
-void sub_rel_array_fixup_delete_static(Entity** array, const int start_pos, const int end, const int step)
+inline __attribute__((always_inline)) void sub_rel_array_fixup_delete_complete(Entity** dest_array, const int start_pos, const int end, Entity** src_array, char** dest_name_array)
+{
+  int i;
+  for (i=start_pos; i<end; i++)
+  {
+    int next = i+1;
+    dest_array[i] = dest_array[next];
+    src_array[i] = src_array[next];
+    dest_name_array[i] = dest_name_array[next];
+  }
+}
+//given the pointer to the arrays to restore, the starting position
+//and the end postion, this function restores the order in the arrays.
+
+inline __attribute__((always_inline)) void sub_rel_array_fixup_delete_complete_static(Entity** dest_array, const int start_pos, const int end, Entity** src_array, char** dest_name_array, const int step)
+{
+  int i;
+  for (i=start_pos; i<end; i++)
+  {
+    int next = i+step;
+    dest_array[i] = dest_array[next];
+    src_array[i] = src_array[next];
+    dest_name_array[i] = dest_name_array[next];
+  }
+}
+//given the pointer to the arrays to restore, the starting position
+//and the end postion, this function restores the order in the arrays.
+
+inline __attribute__((always_inline)) void sub_rel_array_fixup_delete_static(void** array, const int start_pos, const int end, const int step)
 {
   int i;
   for (i=start_pos; i<end; i++)
@@ -360,7 +390,7 @@ void sub_rel_array_fixup_delete_static(Entity** array, const int start_pos, cons
 //and the end postion, this function restores the order in the array.
 //Used for consecutive deletions in the report.
 
-void sub_rel_pos_array_fixup_delete(int* array, int start_pos, int end)
+inline __attribute__((always_inline)) void sub_rel_pos_array_fixup_delete(int* array, int start_pos, int end)
 {
   int i;
   for (i=start_pos; i<end; i++)
@@ -369,7 +399,7 @@ void sub_rel_pos_array_fixup_delete(int* array, int start_pos, int end)
 //given the pointer to the array to restore, the starting position
 //and the end postion, this function restores the order in the array.
 
-void sub_rel_pos_array_fixup(int* array, int start_pos, const int max, int replacer)
+inline __attribute__((always_inline)) void sub_rel_pos_array_fixup(int* array, int start_pos, const int max, int replacer)
 {
   int i;
   for (i=max; i>start_pos; i--)
@@ -380,7 +410,7 @@ void sub_rel_pos_array_fixup(int* array, int start_pos, const int max, int repla
 //end postion and the entity that replaces, this function restores
 //the order in the array.
 
-void rel_buffer_fixup_delete(Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int start_pos)
+inline __attribute__((always_inline)) void rel_buffer_fixup_delete(Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int start_pos)
 {
   int i;
   int rel_num = number_of_relations;
@@ -400,7 +430,7 @@ Relation* create_relation(String name)
 //Create relation in hash table, create relation in ordered list and
 //return the pointer to the relation in hash table.
 
-int relation_add_entities(Relation* rel, Entity* src, Entity* dest, int dest_pos, char* dest_name)
+int relation_add_entities(Relation* rel, Entity* src, Entity* dest, char* dest_name)
 {
   //setup
   int rel_num = rel->sub_relation_number;
@@ -415,6 +445,8 @@ int relation_add_entities(Relation* rel, Entity* src, Entity* dest, int dest_pos
     dest_array[0] = dest;
     src_array[0] = src;
     rel->sub_relation_number ++;
+    src->rel_num ++;
+    dest->rel_num ++;
     return 1;
   }
   else
@@ -429,6 +461,8 @@ int relation_add_entities(Relation* rel, Entity* src, Entity* dest, int dest_pos
       sub_rel_array_fixup(dest_array, mid_val, rel_num, dest);
       sub_rel_array_fixup(src_array, mid_val, rel_num, src);
       rel->sub_relation_number = rel_num;
+      src->rel_num ++;
+      dest->rel_num ++;
       #ifdef deb
         printf("added sub relation in %d\n", mid_val);
       #endif
@@ -489,8 +523,7 @@ int handle_entity_creation(Entity** entity_table, String name)
 int handle_relation_creation(Entity** entity_table, Relation* relations_buffer[RELATIONS_BUFFER_SIZE], String name1, String name2, String name)
 {
   Entity* e1 = get_entity(entity_table, name1);
-  int e2_pos = get_entity_pos(entity_table, name2);
-  Entity* e2 = entity_table[e2_pos];
+  Entity* e2 = get_entity(entity_table, name2);
 
   if (e1 == 0 || e2 == 0) //check if entities exist.
   {
@@ -508,7 +541,7 @@ int handle_relation_creation(Entity** entity_table, Relation* relations_buffer[R
   static Relation* prev_rel = 0;
 
   if (strcmp(prev_relation_name, name) == 0)
-    return relation_add_entities(prev_rel, e1, e2, e2_pos, name2);
+    return relation_add_entities(prev_rel, e1, e2, name2);
 
   int rel_num = number_of_relations;
 
@@ -516,7 +549,7 @@ int handle_relation_creation(Entity** entity_table, Relation* relations_buffer[R
   {
     relations_buffer[0] = create_relation(name);
     number_of_relations ++;
-    return relation_add_entities(relations_buffer[0], e1, e2, e2_pos, name2);
+    return relation_add_entities(relations_buffer[0], e1, e2, name2);
   }
 
   int r = rel_num-1, l = 0, val, mid;
@@ -535,7 +568,7 @@ int handle_relation_creation(Entity** entity_table, Relation* relations_buffer[R
             #endif
             prev_rel = relations_buffer[mid];
             memcpy(prev_relation_name, name, sizeof(String));
-            return relation_add_entities(relations_buffer[mid], e1, e2, e2_pos, name2);
+            return relation_add_entities(relations_buffer[mid], e1, e2, name2);
         }
         if (val < 0)
             r = mid - 1;
@@ -552,7 +585,7 @@ int handle_relation_creation(Entity** entity_table, Relation* relations_buffer[R
   memcpy(prev_relation_name, name, sizeof(String));
   number_of_relations ++;
   rel_buffer_fixup(relations_buffer, l, self);
-  return relation_add_entities(self, e1, e2, e2_pos, name2);
+  return relation_add_entities(self, e1, e2, name2);
 }
 //handle relation creation, return 0 if nothing was created, the relation
 //created or modified otherwise.
@@ -574,7 +607,7 @@ Entity* delent_function(Entity** entity_table, String name)
   entity_array_fixup_delete(&entity_table[pos], entity_pos);
 
   #ifdef deb
-    printf("deallocated entity at %p\n", (void*) entity);
+    printf("deallocated entity at %p, relations = %d\n", (void*) entity, entity->rel_num);
   #endif
   if (entity->rel_num != 0)
     return entity;
@@ -626,8 +659,7 @@ int delrel_function(Entity** entity_table, Relation* relations_buffer[RELATIONS_
   }
 
   Entity* src = get_entity(entity_table, name_source);
-  int dest_pos = get_entity_pos(entity_table, name_dest);
-  Entity* dest = entity_table[dest_pos];
+  Entity* dest  = get_entity(entity_table, name_dest);
 
   if (src == 0 || dest == 0) //check if entities and relation exist.
   {
@@ -652,8 +684,8 @@ int delrel_function(Entity** entity_table, Relation* relations_buffer[RELATIONS_
       int rr = rel->sub_relation_number;
       src->rel_num --;
       dest->rel_num --;
-      sub_rel_array_fixup_delete(dest_array, i, rr);
-      sub_rel_array_fixup_delete(src_array, i, rr);
+      sub_rel_array_fixup_delete( (void**) dest_array, i, rr);
+      sub_rel_array_fixup_delete( (void**) src_array, i, rr);
       #ifdef deb
         printf("deleted relation at i = %d\n", i);
       #endif
@@ -768,8 +800,8 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
                 {
                   int step = i - temp_start;
                   rel_num -= step;
-                  sub_rel_array_fixup_delete_static(dest_array, temp_start, rel_num, step);
-                  sub_rel_array_fixup_delete_static(src_array, temp_start, rel_num, step);
+                  sub_rel_array_fixup_delete_static( (void**) dest_array, temp_start, rel_num, step);
+                  sub_rel_array_fixup_delete_static( (void**) src_array, temp_start, rel_num, step);
                   mode = 0;
                   i -= step;
                 }
@@ -787,8 +819,8 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
                   else
                   {
                     rel_num --;
-                    sub_rel_array_fixup_delete(dest_array, i, rel_num);
-                    sub_rel_array_fixup_delete(src_array, i, rel_num);
+                    sub_rel_array_fixup_delete( (void**) dest_array, i, rel_num);
+                    sub_rel_array_fixup_delete( (void**) src_array, i, rel_num);
                   }
                 }
                 else
@@ -1057,6 +1089,9 @@ int main() //main program
             deleted_entities_array[del_ent_num] = ent;
             del_ent_num ++;
             report_needed = 1;
+            #ifdef deb
+              printf("\ndeleted entity was in at least a relation!\n\n");
+            #endif
           }
           prev_opcode = 2;
           memcpy(prev_arg, argument0, sizeof(String));
@@ -1071,6 +1106,9 @@ int main() //main program
               deleted_entities_array[del_ent_num] = ent;
               del_ent_num ++;
               report_needed = 1;
+              #ifdef deb
+                printf("\ndeleted entity was in a relation!\n\n");
+              #endif
             }
             memcpy(prev_arg, argument0, sizeof(String));
           }
