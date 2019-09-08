@@ -401,15 +401,6 @@ int relation_add_entities(Relation* rel, Entity* src, Entity* dest, String dest_
 //adds entities to the new/existing relation;
 //return 0 if everything went okay, else 1.
 
-void entity_array_fixup_delete(Entity** array, int start)
-{
-  int i;
-  for (i=start; array[i+1] != NULL; i++)
-    array[i] = array[i+1];
-  array[i] = NULL;
-}
-//fixup the entity array after deleting one.
-
 int handle_entity_creation(Entity** entity_table, String name)
 {
   //do the hash function but also save the value of the entity
@@ -661,7 +652,7 @@ int check_entity_validity(Entity* entity, Entity** array, int del_num)
 }
 //checks if the given entity hasn't been deleted.
 
-char* fast_strcat(char* dest, char* src)
+inline __attribute__((always_inline)) char* fast_strcat(char* dest, char* src)
 {
   while (*dest) dest++;
   while (*dest++ = *src++);
@@ -669,12 +660,20 @@ char* fast_strcat(char* dest, char* src)
 }
 //a version of strcat that returns a pointer to the last char of the string.
 
+inline __attribute__((always_inline)) char* append_char(char* dest, const char src)
+{
+  while (*dest) dest++;
+  *dest = src;
+  return dest;
+}
+//adds a char to the destination string.
+
 int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int update, Entity** del_array, int del_num)
 {
   //if there are no relations, do nothing
   if (number_of_relations == 0)
   {
-    puts("none");
+    fputs_unlocked("none\n", stdout);
     return 0;
   }
 
@@ -899,11 +898,11 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
 
             relation->sub_relation_number = rel_num/3;
             p = fast_strcat(p, relation->name);
-            p = fast_strcat(p, " ");
+            p = append_char(p, ' ');
             for (int i=0; i<rel_num_temp; i++)
             {
               p = fast_strcat(p, *rel_report_temp[i]);
-              p = fast_strcat(p, " ");
+              p = append_char(p, ' ');
             }
             sprintf(tmp, "%d; ", maximum);
             p = fast_strcat(p, tmp);
@@ -932,6 +931,7 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
           printf("changing relation, new rel_num = %d\n\n", relation->sub_relation_number);
         #endif
       }
+      append_char(p, '\n');
     }
     else
     {
@@ -1020,11 +1020,11 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
           #endif
 
           p = fast_strcat(p, relation->name);
-          p = fast_strcat(p, " ");
+          p = append_char(p, ' ');
           for (int i=0; i<rel_num_temp; i++)
           {
             p = fast_strcat(p, *rel_report_temp[i]);
-            p = fast_strcat(p, " ");
+            p = append_char(p, ' ');
           }
           sprintf(tmp, "%d; ", maximum);
           p = fast_strcat(p, tmp);
@@ -1040,12 +1040,13 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
           sig_forget ++;
         }
       }
+      append_char(p, '\n');
       number_of_relations = rr;
     }
   }
 
   //acutally print the saved report string.
-  puts(report_string);
+  fputs_unlocked(report_string, stdout);
 
   return sig_forget;
 }
