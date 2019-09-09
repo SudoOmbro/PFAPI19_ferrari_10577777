@@ -3,8 +3,8 @@
 #include <string.h>
 
 /*
-  TODO:
-  - fixa il report.
+  PROJECT:
+    monitor a big amount of relations between a big amount of entities.
 */
 
 #define ENTITY_TABLE_SIZE  312353 // 312353, 711353, 53549, 6451, 27919
@@ -89,16 +89,14 @@ inline __attribute__((always_inline)) unsigned int entity_get_hash(char* name)
 }
 //CRC32b algorithm
 
-int get_argument(LongString input_string, char* dest_string, int start_pos)
+char* get_argument(LongString input_string, char* dest_string)
 {
-  input_string += start_pos;
-  dest_string[0] = '"';
-  int string_length = 1;
+  *dest_string = '"';
   while (*input_string != '"') //while the char is valid
-    dest_string[string_length++] = *input_string++;
-  dest_string[string_length] = '"';
-  dest_string[string_length+1] = '\0';
-  return start_pos+string_length;
+    *++dest_string = *input_string++;
+  *++dest_string = '"';
+  *++dest_string = '\0';
+  return input_string+3;
 }
 //given a string in stdin, it fills dest_string with the input_string
 //until a ' " ' is found. Returns position in input string.
@@ -238,7 +236,7 @@ Entity** src_array, String** dna, Entity* dest, int l, int r, Entity* src, char*
 //looks for a sub relation, if it does not exist, return the position in which
 //to create the new relation, else return -1
 
-Relation* get_relation(Relation* relations_buffer[RELATIONS_BUFFER_SIZE], String name)
+inline __attribute__((always_inline)) Relation* get_relation(Relation* relations_buffer[RELATIONS_BUFFER_SIZE], String name)
 {
   #ifdef deb
     printf("getting relation %s.\n", name);
@@ -268,20 +266,13 @@ inline __attribute__((always_inline)) Entity* create_entity(String name, unsigne
 }
 //create entity, return the pointer to the created entity.
 
-inline __attribute__((always_inline)) void rel_buffer_fixup(Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int start_pos, Relation* replacer, int end)
+inline __attribute__((always_inline)) void rel_buffer_fixup(Relation** relations_buffer, int start_pos, Relation* replacer, int end)
 {
   Relation** dest = relations_buffer+(start_pos);
   memmove( (void*) (dest+1), (void*) dest, (end-start_pos) << 3);
   *((Relation**) dest) = replacer;
 }
 //fixup the relation buffer after adding a relation.
-
-inline __attribute__((always_inline)) void rel_buffer_fixup_delete(Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int start_pos, const int end)
-{
-  Relation** dest = relations_buffer+(start_pos);
-  memmove( (void*) dest, (void*) (dest+1), (end-start_pos) << 3);
-}
-//fixup the relation buffer after deleting a relation.
 
 inline __attribute__((always_inline)) void sub_rel_array_fixup_complete(
 void* subrel_array, const int start_pos, const int end, Entity* dest_replacer,
@@ -332,7 +323,7 @@ void* subrel_array, int start_pos, const int end, int step)
 //end postion and the replacers, this function restores
 //the order in the arrays.
 
-Relation* create_relation(String name)
+inline __attribute__((always_inline)) Relation* create_relation(String name)
 {
   //create the relation to put in hash table
   Relation* self = (Relation*) malloc(sizeof(Relation));
@@ -417,6 +408,7 @@ int handle_entity_creation(Entity** entity_table, String name)
   }
   #ifdef deb
     printf("entity already exists.\n");
+    ++ collisions;
   #endif
   return 0;
 }
@@ -536,8 +528,12 @@ Entity* delent_function(Entity** entity_table, String name)
 
 void delete_unused_relation(Relation** relations_buffer, Relation* rel, int start_pos, int num)
 {
-  rel_buffer_fixup_delete(relations_buffer, start_pos, num);
+  Relation** dest = relations_buffer+(start_pos);
+  #ifdef deb
+    printf("relation to delete: %s (%d), next: %d\n", (rel)->name, rel->sub_relation_number,num-start_pos);
+  #endif
   free(rel);
+  memmove( ((void*) dest), ((void*) (dest+1)), (num-start_pos) << 3);
 }
 //deletes a relation with no sub relations.
 
@@ -626,10 +622,10 @@ String name_source, String name_dest, String rel_name, int sig_forget)
   if (i > -1)
   {
       int rr = rel->sub_relation_number;
-      rel->sub_relation_number --;
-      src->rel_num --;
-      dest->rel_num --;
+      -- (src->rel_num);
+      -- (dest->rel_num);
       sub_rel_array_fixup_delete_complete(dest_array, i, rr);
+      -- (rel->sub_relation_number);
       #ifdef deb
         printf("deleted relation at i = %d\n", i);
       #endif
@@ -660,15 +656,7 @@ inline __attribute__((always_inline)) char* fast_strcat(char* dest, char* src)
 }
 //a version of strcat that returns a pointer to the last char of the string.
 
-inline __attribute__((always_inline)) char* append_char(char* dest, const char src)
-{
-  while (*dest) dest++;
-  *dest = src;
-  return dest;
-}
-//adds a char to the destination string.
-
-int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int update, Entity** del_array, int del_num)
+int report_function( Relation** relations_buffer, int update, Entity** del_array, int del_num)
 {
   //if there are no relations, do nothing
   if (number_of_relations == 0)
@@ -685,8 +673,11 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
     #ifdef deb
       printf("something changed in the relations, updating report string...\n");
     #endif
-    report_string[0] = '\0';
+
+    //reset report string
+    *report_string = '\0';
     char* p = report_string;
+
     //aux variables
     Entity* prev_entity;
     Entity* temp_entity;
@@ -718,6 +709,9 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
       int h = 0;
       while (h < rr)
       {
+        #ifdef deb
+          printf("new relation\n");
+        #endif
         relation = relations_buffer[h];
         rel_num = (relation->sub_relation_number)*3;
         dest_array = (Entity**) relation->subrel_array;
@@ -738,6 +732,9 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
 
           while (i<rel_num)
           {
+            #ifdef deb
+              printf("testing the switch\n");
+            #endif
             switch (mode)
             {
               case 0: //normal mode
@@ -748,6 +745,7 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
                 if (check_entity_validity(temp_entity, del_array, del_num))
                 {
                   #ifdef deb
+                    printf("i: %d, rel_num: %d\n", i, rel_num);
                     printf("destination %s is valid, changing mode to 2\n", temp_entity->name);
                   #endif
                   mode = 2;
@@ -757,6 +755,7 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
                 else
                 {
                   #ifdef deb
+                    printf("i: %d, rel_num: %d\n", i, rel_num);
                     printf("destination %s is not valid, changing mode to 1\n", temp_entity->name);
                   #endif
                   mode = 1;
@@ -775,6 +774,7 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
                 if (temp_entity == prev_entity)
                 {
                   #ifdef deb
+                    printf("i: %d, rel_num: %d\n", i, rel_num);
                     printf("same destination as before (%s)\n", temp_entity->name);
                   #endif
                   i += 3;
@@ -792,6 +792,7 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
                   if (check_entity_validity(temp_entity, del_array, del_num))
                   {
                     #ifdef deb
+                      printf("i: %d, rel_num: %d\n", i, rel_num);
                       printf("destination %s is valid, changing mode to 2\n", temp_entity->name);
                     #endif
                     mode = 2;
@@ -801,6 +802,7 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
                   else
                   {
                     #ifdef deb
+                      printf("i: %d, rel_num: %d\n", i, rel_num);
                       printf("destination %s is not valid, staying in mode 1\n", temp_entity->name);
                     #endif
                     prev_entity = temp_entity;
@@ -821,7 +823,7 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
                   if (check_entity_validity(src_array[i], del_array, del_num))
                   {
                     #ifdef deb
-                      printf("source %s is valid\n", src_array[i]->name);
+                      printf("source %s is valid, increasing tmp counter\n", src_array[i]->name);
                     #endif
                     ++ temp_counter;
                     i += 3;
@@ -832,7 +834,7 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
                       printf("deleting %s --> %s\n", src_array[i]->name, dest_array[i]->name);
                     #endif
                     sub_rel_array_fixup_delete_complete(dest_array, temp_start, rel_num);
-                    -- rel_num;
+                    rel_num -= 3;
                   }
                 }
                 else
@@ -856,7 +858,7 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
                       rel_num_temp = 1;
                       maximum = temp_counter;
                     }
-                    temp_counter = 1;
+                    temp_counter = 0;
 
                     prev_entity = temp_entity;
                     temp_start = i;
@@ -877,6 +879,10 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
             }
           }
 
+          #ifdef deb
+            printf("Cycle finished...\n");
+          #endif
+
           if (mode == 1)
           {
             rel_num -= i - temp_start;
@@ -896,13 +902,20 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
               maximum = temp_counter;
             }
 
+            #ifdef deb
+              printf("ARRAY %s(%d, %d):\n", relation->name, rel_num_temp, maximum);
+              for (int i=0; i<rel_num_temp; i++)
+                printf("%s\n", *rel_report_temp[i]);
+              printf("\n");
+            #endif
+
             relation->sub_relation_number = rel_num/3;
             p = fast_strcat(p, relation->name);
-            p = append_char(p, ' ');
+            *(p++) = ' ';
             for (int i=0; i<rel_num_temp; i++)
             {
               p = fast_strcat(p, *rel_report_temp[i]);
-              p = append_char(p, ' ');
+              *(p++) = ' ';
             }
             sprintf(tmp, "%d; ", maximum);
             p = fast_strcat(p, tmp);
@@ -913,8 +926,8 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
             #ifdef deb
               printf("relation %s is unused, deleting (LATE)\n", relation->name);
             #endif
-            delete_unused_relation(relations_buffer, relation, h, rr);
             -- rr;
+            delete_unused_relation(relations_buffer, relation, h, rr);
             ++ sig_forget;
           }
         }
@@ -923,26 +936,29 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
           #ifdef deb
             printf("relation %s is unused, deleting\n", relation->name);
           #endif
-          delete_unused_relation(relations_buffer, relation, h, rr);
           -- rr;
+          delete_unused_relation(relations_buffer, relation, h, rr);
           ++ sig_forget;
         }
         #ifdef deb
-          printf("changing relation, new rel_num = %d\n\n", relation->sub_relation_number);
+          printf("changing relation\n\n");
         #endif
       }
-      append_char(p, '\n');
+      #ifdef deb
+        printf("finished updating the report string.\n", relation->name);
+      #endif
+      *(p++) = '\n';
     }
     else
     {
       #ifdef deb
-        printf("entities have NOT been deleted, cleaning up...\n");
+        printf("entities have NOT been deleted, no clean up required...\n");
       #endif
       int h = 0;
       while (h < rr)
       {
         relation = relations_buffer[h];
-        rel_num = relation->sub_relation_number;
+        rel_num = (relation->sub_relation_number)*3;
         if (rel_num > 0)
         {
           #ifdef deb
@@ -1020,11 +1036,11 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
           #endif
 
           p = fast_strcat(p, relation->name);
-          p = append_char(p, ' ');
+          *(p++) = ' ';
           for (int i=0; i<rel_num_temp; i++)
           {
             p = fast_strcat(p, *rel_report_temp[i]);
-            p = append_char(p, ' ');
+            *(p++) = ' ';
           }
           sprintf(tmp, "%d; ", maximum);
           p = fast_strcat(p, tmp);
@@ -1040,9 +1056,12 @@ int report_function( Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int upda
           sig_forget ++;
         }
       }
-      append_char(p, '\n');
-      number_of_relations = rr;
+      #ifdef deb
+        printf("finished updating the report string.\n", relation->name);
+      #endif
+      *(p++) = '\n';
     }
+    number_of_relations = rr;
   }
 
   //acutally print the saved report string.
@@ -1104,6 +1123,7 @@ int main() //main program
   String argument1;
   String argument2;
   LongString input_string;
+  char* str_pointer;
   //optimization variables
   int prev_opcode = 5;
   String prev_arg = "";
@@ -1114,7 +1134,6 @@ int main() //main program
     int command_counter = 0;
   #endif
 
-  int opcode;
   while (1)
   {
     fgets_unlocked(input_string, sizeof(LongString), stdin);
@@ -1123,13 +1142,13 @@ int main() //main program
       printf("\nCOMMAND %d: %sPREVIOUS ARG: %s\nPREVIOUS OPCODE: %d\nCOLLISIONS: %d\n", command_counter, input_string, prev_arg, prev_opcode, collisions);
       command_counter ++;
     #endif
-    switch (input_string[0])
+    switch (*input_string)
     {
       case 'a': //addent or addrel
       {
         if (input_string[3] == 'e') //addent
         {
-          get_argument(input_string, argument0, 8);
+          get_argument(input_string+8, argument0);
           if (prev_opcode != 0)
           {
             memcpy(prev_arg, argument0, sizeof(String));
@@ -1151,9 +1170,9 @@ int main() //main program
         }
         else //addrel
         {
-          opcode = get_argument(input_string, argument0, 8);
-          opcode = get_argument(input_string, argument1, opcode+2);
-          get_argument(input_string, argument2, opcode+2);
+          str_pointer = get_argument(input_string+8, argument0);
+          str_pointer = get_argument(str_pointer, argument1);
+          get_argument(str_pointer, argument2);
           if (handle_relation_creation(entity_table, relations_buffer,  argument0, argument1, argument2, sig_forget) != 0)
           {
             report_needed = 1;
@@ -1171,7 +1190,7 @@ int main() //main program
       {
         if (input_string[3] == 'e') //delent
         {
-          get_argument(input_string, argument0, 8);
+          get_argument(input_string+8, argument0);
           if (prev_opcode != 2)
           {
             Entity* ent = delent_function(entity_table, argument0);
@@ -1211,9 +1230,9 @@ int main() //main program
         }
         else //delrel
         {
-          opcode = get_argument(input_string, argument0, 8);
-          opcode = get_argument(input_string, argument1, opcode+2);
-          get_argument(input_string, argument2, opcode+2);
+          str_pointer = get_argument(input_string+8, argument0);
+          str_pointer = get_argument(str_pointer, argument1);
+          get_argument(str_pointer, argument2);
           if (delrel_function(entity_table, relations_buffer, argument0, argument1, argument2, sig_forget_del) != 0)
           {
             report_needed = 1;
