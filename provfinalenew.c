@@ -947,7 +947,7 @@ int report_function( Relation** relations_buffer, int update, Entity** del_array
       #ifdef deb
         printf("finished updating the report string.\n", relation->name);
       #endif
-      *(p++) = '\n';
+      *(p) = '\n';
     }
     else
     {
@@ -1059,7 +1059,7 @@ int report_function( Relation** relations_buffer, int update, Entity** del_array
       #ifdef deb
         printf("finished updating the report string.\n", relation->name);
       #endif
-      *(p++) = '\n';
+      *(p) = '\n';
     }
     number_of_relations = rr;
   }
