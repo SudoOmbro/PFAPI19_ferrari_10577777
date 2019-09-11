@@ -180,7 +180,7 @@ int sub_relations_binary_search_creation(SubRelation** array, String dest_name, 
         if (ext_val == 0)
         {
           #ifdef deb
-            printf("Destination exists");
+            printf("Destination exists\n");
           #endif
           return mid;
         }
@@ -253,7 +253,8 @@ int src_binary_search_creation(Entity** src_array, Entity* src, int l, int r)
     else
       r = mid - 1;
   }
-  sub_rel_array_fixup((void**)src_array, l, r, src);
+  sub_rel_array_fixup((void**)src_array, l, size, src);
+  ++ (src->rel_num);
   return 1;
 }
 //looks for an entity in the src_buffer of a relation, if it finds it it returns
@@ -326,8 +327,8 @@ SubRelation* create_sub_relation(Entity* src, Entity* dest)
   *(self->source_buffer) = src;
   self->destination = dest;
   strcpy(self->dest_name, dest->name);
-  src->rel_num ++;
-  dest->rel_num ++;
+  ++ (src->rel_num);
+  ++ (dest->rel_num);
   return self;
 }
 //creates a sub relation and returns the pointer to that.
@@ -350,6 +351,20 @@ int relation_add_entities(Relation* rel, Entity* src, Entity* dest)
   else
   {
     int mid_val = sub_relations_binary_search_creation(array, dest->name, 0, rel_num-1, src);
+    #ifdef deb
+      printf("finished binary search\n");
+    #endif
+    if (mid_val == rel_num)
+    {
+      sub_rel = create_sub_relation(src, dest);
+      ++ rel_num;
+      sub_rel_array_fixup( (void**) array, mid_val, rel_num, sub_rel);
+      rel->sub_relation_number = rel_num;
+      #ifdef deb
+        printf("added sub new destination in last position (%d)\n", mid_val);
+      #endif
+      return 1;
+    }
     if (array[mid_val]->destination == dest)
     {
       SubRelation* sub_rel = array[mid_val];
@@ -359,7 +374,8 @@ int relation_add_entities(Relation* rel, Entity* src, Entity* dest)
       }
       else
       {
-        ++(sub_rel->src_num);
+        ++ (sub_rel->src_num);
+        ++ (dest->rel_num);
         return 1;
       }
     }
@@ -506,8 +522,8 @@ void delete_unused_relation(Relation* relations_buffer[RELATIONS_BUFFER_SIZE], R
 
 int delrel_function(Entity** entity_table, Relation* relations_buffer[RELATIONS_BUFFER_SIZE], String name_source, String name_dest, String rel_name)
 {
+  //check if relation exists
   Relation* rel = get_relation(relations_buffer, rel_name);
-
   if (rel == 0)
   {
     #ifdef deb
@@ -515,7 +531,7 @@ int delrel_function(Entity** entity_table, Relation* relations_buffer[RELATIONS_
     #endif
     return 0;
   }
-
+  //check if source exists
   Entity* src = get_entity(entity_table, name_source);
   if(src == 0) //check if entities and relation exist.
   {
@@ -524,6 +540,7 @@ int delrel_function(Entity** entity_table, Relation* relations_buffer[RELATIONS_
     #endif
     return 0;
   }
+  //check if destination exists
   Entity* dest = get_entity(entity_table, name_dest);
   if(dest == 0) //check if entities and relation exist.
   {
@@ -533,14 +550,14 @@ int delrel_function(Entity** entity_table, Relation* relations_buffer[RELATIONS_
     return 0;
   }
 
-  SubRelation* sub_rel;
-  int i;
-  SubRelation** array;
-
-  //delete sub relation from relation list in relation
   #ifdef deb
     printf("relation may exist.\n");
   #endif
+
+  SubRelation* sub_rel;
+  int i;
+  SubRelation** array;
+  
   array = (SubRelation**) rel->sub_rel_array;
   i = sub_relations_binary_search(array, name_dest, 0, rel->sub_relation_number-1, src);
   if (i > -1)
@@ -848,7 +865,8 @@ void deb_print_sub_relations(Relation* rel)
         int src_num = array[i]->src_num;
         for (int j=0; j<src_num; j++)
         {
-          printf("%d (%d): %s --%s--> %s\n", i, j, src_buffer[j]->name, rel->name, dest->name);
+          printf("%d (%d): %s (%d) --%s--> %s (%d)\n", i, j, src_buffer[j]->name,
+          src_buffer[j]->rel_num, rel->name, dest->name, dest->rel_num);
         }
       }
       else
