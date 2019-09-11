@@ -111,8 +111,11 @@ int relations_binary_search(Relation* relations_buffer[RELATIONS_BUFFER_SIZE], S
   return -1;
 }
 
-int sub_relations_binary_search(SubRelation** array, String name, int l, int r, Entity* src)
+int sub_relations_binary_search(SubRelation** array, String name, int l, int r)
 {
+  #ifdef deb
+    printf("looking for destination %s\n", name);
+  #endif
   int mid;
   int out_val;
   while (r >= l)
@@ -166,7 +169,7 @@ void sub_rel_array_fixup_delete(void** array, int start_pos, int end)
 //given the pointer to the array to restore, the starting position
 //and the end postion, this function restores the order in the array.
 
-int sub_relations_binary_search_creation(SubRelation** array, String dest_name, int l, int r, Entity* src)
+int sub_relations_binary_search_creation(SubRelation** array, String dest_name, int l, int r)
 {
   int mid;
   int ext_val;
@@ -209,6 +212,9 @@ int sub_relations_binary_search_creation(SubRelation** array, String dest_name, 
 
 int src_binary_search(Entity** src_array, Entity* src, int l, int r)
 {
+  #ifdef deb
+    printf("looking for source %s\n", src->name);
+  #endif
   int mid;
   Entity* val;
   while (r >= l)
@@ -350,7 +356,7 @@ int relation_add_entities(Relation* rel, Entity* src, Entity* dest)
   }
   else
   {
-    int mid_val = sub_relations_binary_search_creation(array, dest->name, 0, rel_num-1, src);
+    int mid_val = sub_relations_binary_search_creation(array, dest->name, 0, rel_num-1);
     #ifdef deb
       printf("finished binary search\n");
     #endif
@@ -555,30 +561,48 @@ int delrel_function(Entity** entity_table, Relation* relations_buffer[RELATIONS_
   #endif
 
   SubRelation* sub_rel;
-  int i;
+  int i, j;
   SubRelation** array;
-  
+
   array = (SubRelation**) rel->sub_rel_array;
-  i = sub_relations_binary_search(array, name_dest, 0, rel->sub_relation_number-1, src);
-  if (i > -1)
+  i = sub_relations_binary_search(array, name_dest, 0, rel->sub_relation_number-1);
+  if (i != -1)
   {
       sub_rel = array[i];
-      free(sub_rel);
-      rel->sub_relation_number --;
-      src->rel_num --;
-      dest->rel_num --;
-      sub_rel_array_fixup_delete((void**)array, i, rel->sub_relation_number);
+      Entity** src_array = array[i]->source_buffer;
+      j = src_binary_search(src_array, src, 0, array[i]->src_num-1);
+      if (j != -1)
+      {
+        if (array[i]->src_num == 1)
+        {
+          free(sub_rel);
+          sub_rel_array_fixup_delete((void**)array, i, --rel->sub_relation_number);
+          #ifdef deb
+            printf("deleted sub relation %s %s\n", name_source, name_dest);
+          #endif
+        }
+        else
+        {
+          sub_rel_array_fixup_delete((void**)src_array, j, --array[i]->src_num);
+          #ifdef deb
+            printf("deleted source %s in sub relation %s\n", name_source, name_dest);
+          #endif
+        }
+        src->rel_num --;
+        dest->rel_num --;
+        return 1;
+      }
       #ifdef deb
-        printf("deleted relation at i = %d\n", i);
+        printf("source does not exist (LATE)\n");
       #endif
-      return 1;
+      return 0;
   }
   #ifdef deb
-    printf("relation does not exist (LATE)\n");
+    printf("destination does not exist (LATE)\n");
   #endif
   return 0;
 }
-//deletes a relation; return 1 if success, else 0
+//deletes a sub relation; return 1 if success, else 0
 
 int check_entity_validity(Entity* entity, Entity** array, int del_num)
 {
@@ -839,6 +863,33 @@ int report_function(Entity** entity_table, Relation* relations_buffer[RELATIONS_
   return 1;
 }
 
+int report_function(Relation* relations_buffer[RELATIONS_BUFFER_SIZE], int update, Entity** del_array, int del_num)
+{
+  //if there are no relations, do nothing
+  if (number_of_relations == 0)
+  {
+    printf("none\n");
+    return 0;
+  }
+
+  static SuperLongString report_string;
+
+  if (update == 1)
+  {
+    if (del_num > 0)
+    {
+
+    }
+    else
+    {
+
+    }
+  }
+
+  fputs_unlocked(report_string, stdout);
+  return 1;
+}
+
 //debug functions---------------------------------------------------------------
 
 #ifdef deb
@@ -909,7 +960,7 @@ int main() //main program
     char* p;
 
     #ifdef deb
-      printf("\nCOMMAND %d: %s\nCOLLISIONS: %d\n\n", command_counter, input_string, collisions);
+      printf("\nCOMMAND %d: %sCOLLISIONS: %d\n\n", command_counter, input_string, collisions);
       command_counter ++;
     #endif
     switch (input_string[0]) {
