@@ -2,9 +2,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define ENTITY_TABLE_SIZE  711353 //6451
-#define SUB_RELATIONS_ARRAY_SIZE 16384 //98304
-#define RELATIONS_BUFFER_SIZE 512
+#define ENTITY_TABLE_SIZE  711353 //711353
+#define SUB_RELATIONS_ARRAY_SIZE 100000 //98304
+#define RELATIONS_BUFFER_SIZE 1024
 #define SRC_ARRAY_BUFFER 640
 
 /* add -Ddeb to gcc compiler options to compile in verbose debug mode */
@@ -640,7 +640,7 @@ inline __attribute__((always_inline)) int report_function(Relation** relations_b
   //if there are no relations, do nothing
   if (number_of_relations == 0)
   {
-    printf("none\n");
+    puts("none");
     return 0;
   }
 
@@ -888,7 +888,10 @@ inline __attribute__((always_inline)) int report_function(Relation** relations_b
   #ifdef deb
     printf("actual report string:\n");
   #endif
-  fputs_unlocked(report_string, stdout);
+  if (*report_string != '\n')
+    fputs_unlocked(report_string, stdout);
+  else
+    puts("none");
   return 1;
 }
 
