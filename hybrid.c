@@ -3,11 +3,9 @@
 #include <string.h>
 
 #define ENTITY_TABLE_SIZE  711353 //6451
-#define SUB_RELATIONS_ARRAY_SIZE 98304 //78024
-#define RELATIONS_BUFFER_SIZE 128
+#define SUB_RELATIONS_ARRAY_SIZE 16384 //98304
+#define RELATIONS_BUFFER_SIZE 512
 #define SRC_ARRAY_BUFFER 640
-
-#define SPACE *++rp = ' ';
 
 /* add -Ddeb to gcc compiler options to compile in verbose debug mode */
 
@@ -15,7 +13,7 @@
 
 typedef char SuperLongString[5632];
 typedef char LongString[128];
-typedef char String[32];
+typedef char String[40];
 
 typedef struct {
   String name;
@@ -608,9 +606,25 @@ inline __attribute__((always_inline)) int delrel_function(Entity** entity_table,
 
 int check_entity_validity(Entity* entity, Entity** array, int del_num)
 {
+  #ifdef deb
+    printf("checkin validity of %s\n", entity->name);
+  #endif
   while (del_num != 0)
+  {
+    #ifdef deb
+      printf("%d ? %s", del_num-1, array[del_num-1]->name);
+    #endif
     if (entity == array[--del_num])
+    {
+      #ifdef deb
+        printf(" found match, entity is not valid.\n");
+      #endif
       return 0;
+    }
+    #ifdef deb
+      printf(" nope\n");
+    #endif
+  }
   return 1;
 }
 //checks if the given entity hasn't been deleted.
@@ -654,66 +668,114 @@ inline __attribute__((always_inline)) int report_function(Relation** relations_b
         sub_rel_array = (SubRelation**) relation->sub_rel_array;
         maximum = 0;
         temp_counter = 0;
-
+        #ifdef deb
+          printf("checking relation %s ---------------\n", relation->name);
+        #endif
         if (rel_num > 0)
         {
           Entity** src_array;
           int src_num;
 
+          #ifdef deb
+            for(int i=0; i<(relation->sub_relation_number); i++)
+              printf("(%d) %s\n", i, sub_rel_array[i]->dest_name);
+          #endif
+
           for (int j=0; j<rel_num; j++)
           {
             sub_rel = sub_rel_array[j];
+            #ifdef deb
+              printf("[%d]: checking %s for subrelations\n", j, (sub_rel->destination)->name);
+            #endif
             if (check_entity_validity(sub_rel->destination, del_array, del_num) == 0)
             {
               free(sub_rel);
-              sub_rel_array_fixup_delete((void**)sub_rel_array, j, --relation->sub_relation_number);
+              sub_rel_array_fixup_delete((void**)sub_rel_array, j, --(relation->sub_relation_number));
+              -- rel_num;
               #ifdef deb
-                printf("deleted sub relation, dest was not valid.\n");
+                printf("deleted sub relation, destination was not valid. (%d, %d)\n", j-1, (relation->sub_relation_number));
+                for(int i=0; i<(relation->sub_relation_number); i++)
+                  printf("(%d) %s\n", i, sub_rel_array[i]->dest_name);
               #endif
+              src_num = 0;
               -- j;
             }
             else
             {
-              src_array = sub_rel->source_buffer;
+              #ifdef deb
+                printf("%s is valid, checking sources...\n", (sub_rel->destination)->name);
+              #endif
               src_num = sub_rel->src_num;
-              for (int k=0; k<src_num; k++)
+              if (src_num != 0)
               {
-                if (check_entity_validity(src_array[k], src_array, del_num) == 0)
+                src_array = sub_rel->source_buffer;
+                for (int k=0; k<src_num; k++)
                 {
-                  sub_rel_array_fixup_delete((void**)src_array, k, --src_num);
-                  -- k;
+                  if (check_entity_validity(src_array[k], del_array, del_num) == 0)
+                  {
+                    #ifdef deb
+                      printf("source %s is NOT valid\n", src_array[k]->name);
+                    #endif
+                    sub_rel_array_fixup_delete((void**)src_array, k, --src_num);
+                    -- k;
+                  }
+                  else
+                  {
+                    #ifdef deb
+                      printf("source %s is valid\n", src_array[k]->name);
+                    #endif
+                  }
                 }
+                sub_rel->src_num = src_num;
+              }
+              else
+              {
+                free(sub_rel);
+                sub_rel_array_fixup_delete((void**)sub_rel_array, j, --(relation->sub_relation_number));
+                -- rel_num;
+                #ifdef deb
+                  printf("deleted sub relation, destination was not valid. (%d, %d)\n", j-1, (relation->sub_relation_number));
+                  for(int i=0; i<(relation->sub_relation_number); i++)
+                    printf("(%d) %s\n", i, sub_rel_array[i]->dest_name);
+                #endif
+                src_num = 0;
+                -- j;
               }
             }
-            sub_rel->src_num = src_num;
-            #ifdef deb
-              printf("finished checking for %s subrelations\n", (sub_rel->destination)->name);
-            #endif
-            if (src_num > maximum)
+            if (src_num != 0)
             {
-              maximum = src_num;
-              report_array[0] = sub_rel;
-              temp_counter = 1;
+              if (src_num > maximum)
+              {
+                maximum = src_num;
+                report_array[0] = sub_rel;
+                temp_counter = 1;
+              }
+              else if (src_num == maximum)
+                report_array[temp_counter++] = sub_rel;
             }
-            else if (src_num == maximum)
-              report_array[temp_counter++] = sub_rel;
           }
-
-          //fill the report string:
+          #ifdef deb
+            printf("finished creating data structure, (max: %d, num: %d) adding to string...\n", maximum, temp_counter);
+            printf("ARRAY %s(%d, %d):\n", relation->name, temp_counter, maximum);
+            for (int i=0; i<temp_counter; i++)
+              printf("%s\n", report_array[i]->dest_name);
+            printf("\n");
+          #endif
           if (temp_counter != 0)
           {
             rp = fast_strcat(rp, relation->name);
             for (int i=0; i<temp_counter; i++)
             {
-              SPACE
+              *rp++ = ' ';
               rp = fast_strcat(rp, report_array[i]->dest_name);
             }
+            *rp++ = ' ';
             sprintf(tmp, "%d; ", maximum);
             rp = fast_strcat(rp, tmp);
-            *++rp = '\n';
-            *++rp = '\0';
           }
-
+          #ifdef deb
+            printf("%s\n", report_string);
+          #endif
         }
         else
         {
@@ -725,17 +787,107 @@ inline __attribute__((always_inline)) int report_function(Relation** relations_b
           rr --;
         }
         #ifdef deb
-          printf("changing relation\n");
+          printf("\n");
         #endif
       }
-
+      *rp++ = '\n';
+      *rp = '\0';
     }
     else //entites haven't been deleted.
     {
+      int rr = number_of_relations;
+      for (int i=0; i<rr; i++)
+      {
+        relation = relations_buffer[i];
+        rel_num = relation->sub_relation_number;
+        sub_rel_array = (SubRelation**) relation->sub_rel_array;
+        maximum = 0;
+        temp_counter = 0;
+        #ifdef deb
+          printf("checking relation %s ---------------\n", relation->name);
+        #endif
+        if (rel_num > 0)
+        {
+          Entity** src_array;
+          int src_num;
 
+          #ifdef deb
+            for(int i=0; i<(relation->sub_relation_number); i++)
+              printf("(%d) %s\n", i, sub_rel_array[i]->dest_name);
+          #endif
+
+          for (int j=0; j<rel_num; j++)
+          {
+              sub_rel = sub_rel_array[j];
+              src_num = sub_rel->src_num;
+              if (src_num == 0)
+              {
+                free(sub_rel);
+                sub_rel_array_fixup_delete((void**)sub_rel_array, j, --(relation->sub_relation_number));
+                -- rel_num;
+                #ifdef deb
+                  printf("deleted sub relation, destination was not valid. (%d, %d)\n", j-1, (relation->sub_relation_number));
+                  for(int i=0; i<(relation->sub_relation_number); i++)
+                    printf("(%d) %s\n", i, sub_rel_array[i]->dest_name);
+                #endif
+                src_num = 0;
+                -- j;
+              }
+              else
+              {
+                if (src_num > maximum)
+                {
+                  maximum = src_num;
+                  report_array[0] = sub_rel;
+                  temp_counter = 1;
+                }
+                else if (src_num == maximum)
+                  report_array[temp_counter++] = sub_rel;
+              }
+          }
+          #ifdef deb
+            printf("finished creating data structure, (max: %d, num: %d) adding to string...\n", maximum, temp_counter);
+            printf("ARRAY %s(%d, %d):\n", relation->name, temp_counter, maximum);
+            for (int i=0; i<temp_counter; i++)
+              printf("%s\n", report_array[i]->dest_name);
+            printf("\n");
+          #endif
+          if (temp_counter != 0)
+          {
+            rp = fast_strcat(rp, relation->name);
+            for (int i=0; i<temp_counter; i++)
+            {
+              *rp++ = ' ';
+              rp = fast_strcat(rp, report_array[i]->dest_name);
+            }
+            *rp++ = ' ';
+            sprintf(tmp, "%d; ", maximum);
+            rp = fast_strcat(rp, tmp);
+          }
+          #ifdef deb
+            printf("%s\n", report_string);
+          #endif
+        }
+        else
+        {
+          #ifdef deb
+            printf("relation %s is unused, deleting\n", relation->name);
+          #endif
+          delete_unused_relation(relations_buffer, relation, i);
+          i --;
+          rr --;
+        }
+        #ifdef deb
+          printf("\n");
+        #endif
+      }
+      *rp++ = '\n';
+      *rp = '\0';
     }
   }
-
+  #ifdef deb
+    printf("actual report string:\n");
+  #endif
   fputs_unlocked(report_string, stdout);
   return 1;
 }
@@ -854,6 +1006,12 @@ int main() //main program
         #ifdef deb
           deb_print_entities(entity_table);
           deb_print_relations(entity_table, relations_buffer);
+          if (del_ent_num > 0)
+          {
+            printf("deleted entitites array:\n");
+            for (int i=0; i<del_ent_num; i++)
+              printf("%s\n", deleted_entities_array[i]->name);
+          }
         #endif
       }
       else //delrel
@@ -878,6 +1036,7 @@ int main() //main program
         report_needed = 0;
       }
       #ifdef deb
+        printf("\n");
         deb_print_entities(entity_table);
         deb_print_relations(entity_table, relations_buffer);
       #endif
